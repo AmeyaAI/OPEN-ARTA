@@ -1,0 +1,35 @@
+# F9-1 (frontend): When `docker build -f frontend/Dockerfile frontend/` runs
+# (the F8-19 path that adds tsc --noEmit to the build), node_modules and
+# .next must not be in the context — they'd add ~1 GB and override the
+# clean install in the deps stage.
+
+node_modules/
+.next/
+.turbo/
+tsconfig.tsbuildinfo
+
+# Local IDE / OS noise
+.vscode/
+.idea/
+.DS_Store
+
+# Logs / coverage
+*.log
+coverage/
+playwright-report/
+test-results/
+
+# Local env (image gets env via runtime, not bake-in)
+.env
+.env.local
+.env.*.local
+
+# Docker meta + git
+Dockerfile
+.dockerignore
+.git/
+.gitignore
+
+# Docs
+*.md
+README*

@@ -1,0 +1,21 @@
+-- M2 — persist per-project `environments` config to Postgres.
+--
+-- Problem: env config (base_url, auth method/credentials, the canonical auth
+-- profile, and `variables` — which hold a SUT's solved refresh config, e.g.
+-- a reusable api_key grant `arta_refresh_*` + `refresh_token`) lived ONLY
+-- in `.arta/projects.json`. That file is gitignored + host-local, and the DB never
+-- stored `environments`. So a lost projects.json / fresh container / cleared volume
+-- erased a SUT's "solved" auth, forcing it to be re-solved every session. This
+-- column makes it durable across redeploy (hydrated by _resolve_project's DB
+-- fallback + backfilled by sync_projects_to_db).
+--
+-- SECURITY NOTE: `environments.<env>.auth.credentials` + `variables` may contain
+-- plaintext secrets (tokens, api_key, passwords). This is CONSISTENT with secrets
+-- already persisted to Postgres today (`projects.llm_config.api_key`, integration
+-- tokens) and the plaintext `.arta/projects.json` (chmod 0600). FOLLOW-UP: encrypt
+-- sensitive `credentials.*` at rest (envelope key). Do not add new plaintext secret
+-- surfaces beyond what already exists without that follow-up.
+--
+-- Idempotent (ADD COLUMN IF NOT EXISTS), applied at startup by session.py.
+
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS environments JSONB NOT NULL DEFAULT '{}'::jsonb;

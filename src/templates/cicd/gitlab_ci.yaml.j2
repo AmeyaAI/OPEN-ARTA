@@ -1,0 +1,67 @@
+# Fix TTT — ARTA Quality Pipeline (per-project Jinja template)
+# Generated for project {{ project_name }} ({{ project_id }})
+stages:
+  - setup
+  - sync
+  - test
+  - gate
+
+variables:
+  ARTA_API_URL: "{{ arta_api_url }}"
+  ARTA_PROJECT_ID: "{{ project_id }}"
+
+default:
+  image: node:20-alpine
+  before_script:
+    - npm install -g @arta/cli
+
+setup:
+  stage: setup
+  script:
+    - arta version
+
+sync_requirements:
+  stage: sync
+  script:
+    - arta sync-requirements --project "$ARTA_PROJECT_ID"
+
+{% for tool in test_tools %}
+{{ tool }}_tests:
+  stage: test
+  allow_failure: true
+  parallel:
+    matrix:
+{%- for env in environments %}
+      - ENV: {{ env.name }}
+{%- endfor %}
+  script:
+    - arta run --tool {{ tool }} --env "$ENV"
+  artifacts:
+    when: always
+    paths:
+      - .arta/evidence/
+    expire_in: 30 days
+
+{% endfor %}
+quality_gate:
+  stage: gate
+  script:
+    - |
+      RESPONSE=$(arta gate-decision --project "$ARTA_PROJECT_ID" --format json)
+      DECISION=$(echo "$RESPONSE" | jq -r '.decision')
+      SCORE=$(echo "$RESPONSE" | jq -r '.quality_score')
+      echo "ARTA gate: $DECISION (score=$SCORE)"
+      if [ "$DECISION" = "FAIL" ]; then exit 1; fi
+{%- if min_score %}
+      if [ "$DECISION" = "CONCERNS" ] && [ "$SCORE" -lt "{{ min_score }}" ]; then exit 1; fi
+{%- endif %}
+
+{%- if notify_channels %}
+notify_failure:
+  stage: gate
+  when: on_failure
+  script:
+{%- for channel in notify_channels %}
+    - arta notify --channel "{{ channel }}" --status failed
+{%- endfor %}
+{%- endif %}

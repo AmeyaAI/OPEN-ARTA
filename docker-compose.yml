@@ -1,0 +1,481 @@
+version: '3.9'
+
+# ARTA Platform — Local Development Stack
+# Starts: API, PostgreSQL, Neo4j, Redis, ChromaDB, Frontend
+#
+# Setup:
+#   cp .env.example .env        # fill in your values
+#   docker compose up --build
+
+services:
+
+  # ── ARTA API ──────────────────────────────────────────────────────────────
+  arta-api:
+    build:
+      context: .
+      # F8-2: Pin to the `runtime` stage. Without this, `docker compose
+      # build` would pick the LAST Dockerfile stage (train, ~10 GB CUDA
+      # image with torch + unsloth) for every API rebuild.
+      target: runtime
+      args:
+        USER_UID: ${UID:-1001}
+        USER_GID: ${GID:-1001}
+    # Fix SS (Phase E): use Docker's built-in tini as PID 1 to reap
+    # zombie subprocesses. Verified live in run-90b44d / run-217d5a:
+    # the Python worker died while parallel Newman + Playwright +
+    # chrome-headless subprocesses accumulated as zombies because
+    # uvicorn (--reload) doesn't reap them; the worker eventually
+    # exhausted file-descriptors and went zombie itself, leaving the
+    # run hung at status='running'. tini owns subprocess reaping per
+    # the standard Linux init contract.
+    init: true
+    ports:
+      # F20-10: Host port moved 8000 → 38087 to dodge a chronic clash with
+      # schemaExtraction-backend's uvicorn keeps grabbing :8000, blocking
+      # `docker compose restart arta-api`). The CONTAINER port stays at
+      # 8000, so the frontend's internal Next.js rewrite to
+      # `http://arta-api:8000` (set via ARTA_API_INTERNAL_URL) is
+      # unchanged. 38087 was chosen because it's in the IANA registered-
+      # user range, well clear of common dev ports (3000-9000, 27017,
+      # 27520, 5432, 5672, 6379, 7474, 7687, etc.) and not assigned to
+      # any well-known service. Override at deploy time with the
+      # ARTA_API_HOST_PORT env var if 38087 ever clashes too.
+      - "${ARTA_API_HOST_PORT:-38087}:8000"
+    env_file: .env
+    # Secrets-hardening (Phase Final-2): composed-URL secrets (DATABASE_URL, NEO4J_*,
+    # REDIS_URL) now come from .env only — NOT reconstructed inline here. This prevents
+    # `docker compose config` from displaying the interpolated passwords in output.
+    # The `.env.example` documents the expected values. Only non-sensitive defaults
+    # (LLM provider, Ollama URLs, CORS, etc.) live in this block.
+    environment:
+      # Fixed, non-sensitive service endpoints (container-internal DNS)
+      NEO4J_URI: bolt://neo4j:7687
+      CHROMA_URL: http://chromadb:8000
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      # Frontend now served on host 38088 (moved off the clash-prone 3001); keep
+      # 3001 too for anyone still proxying the old port. (Frontend uses same-origin
+      # requests per the frontend block, so this only matters for direct calls.)
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:38088,http://localhost:3001}
+      # LLM provider defaults (overridable via .env)
+      ARTA_LLM_PROVIDER: ${ARTA_LLM_PROVIDER:-ollama}
+      ARTA_LLM_MODEL:    ${ARTA_LLM_MODEL:-arta-qwen-pro:latest}
+      # E2E small-Ollama loop: let data_pipeline analytics reqs reach execution
+      # via source-augmented gen (explicit, tagged recipe_ungrounded — not silent).
+      ARTA_RECIPE_GRACEFUL: ${ARTA_RECIPE_GRACEFUL:-1}
+      # R211 Phase D — opt-in deterministic chain-aware Playwright read-spec
+      # emission ({req}_chain.spec.ts). Default off elsewhere; enabled here for
+      # the live cm-read-chain verification.
+      ARTA_CHAIN_AWARE_PW_ENABLE: ${ARTA_CHAIN_AWARE_PW_ENABLE:-1}
+      # R150.L + R152.A — operator-controlled discovery_probe route skip list.
+      # Comma-separated SPA routes (leading slash). R152.A semantics:
+      # Append `=` for exact-match only (e.g., `/accounts=` skips ONLY
+      # /accounts, leaves /accounts/123 alone).
+      #
+      # chromium mid-evaluate. Admin/data-grid routes (`/accounts`,
+      # `/datasets`, `/subscriptions`, `/users`, `/settings`,
+      # `/collections`) all trigger SPA forced-logout on auth-check
+      # failures. After R151.D unblocked R150.I, org-scoped derived
+      # Prefix-match covers the dynamically-derived set with one entry.
+      #
+      # A7 platform/SUT-separation: this is a DEPLOYMENT default, and the CORRECT
+      # home for per-SUT skip lists is `discovery_settings.skip_routes` (union-
+      # merged into this env var by discovery_executor.py per project). The
+      # generic admin routes below are common SPA-crash guards; the SUT-SPECIFIC
+      # discovery — hence not emptied now, per the no-accuracy-regression rule).
+      ARTA_R150_SKIP_ROUTES: ${ARTA_R150_SKIP_ROUTES:-/accounts,/users,/settings}
+      # R252.2 — fabricated path-param ids (LLM-invented `mock-server-001`
+      # style literals in captured `{param}` slots) BLOCK at gen time via the
+      # R57.1 retry ladder instead of shipping guaranteed-404 tests. Measured
+      # Set to `flag` to revert to log-only.
+      ARTA_R252_FABRICATED_ID_MODE: ${ARTA_R252_FABRICATED_ID_MODE:-block}
+      # R216/R231 — wire the REAL analytics backend so the pytest analytics pillar
+      # stub. Now that R231 resolves dataset_name read-only + auth is fresh, ask()
+      # returns real SUT answers. Killswitch: set to 0.
+      ARTA_ANALYTICS_REAL_BACKEND: ${ARTA_ANALYTICS_REAL_BACKEND:-1}
+      # R232 — analytics pytest specs run REAL SUT queries (~10s each, NL→SQL LLM
+      # reasoning). A spec with several queries blows the legacy 120s per-spec
+      # timeout (29 false FAILs in run-eb6324). Raise to 300s (matches the analytics
+      # _STREAM_TIMEOUT). Env-tunable.
+      ARTA_PYTEST_SPEC_TIMEOUT: ${ARTA_PYTEST_SPEC_TIMEOUT:-300}
+      # R204 — per-call claude_code CLI timeout (seconds). Default 120s is too
+      # low for large-context gen on a slow CLI: Stage-2 ATDD can take 261s and
+      # single calls hit 120s → TimeoutError → generation FAIL. Raised to 300.
+      ARTA_CLI_TIMEOUT_S: ${ARTA_CLI_TIMEOUT_S:-300}
+      # transient SUT-host preflight flakiness this session — backend host is reachable
+      ARTA_RUN_DESPITE_PREFLIGHT_FAIL: ${ARTA_RUN_DESPITE_PREFLIGHT_FAIL:-1}
+      # NOTE (2026-06-13): a force-spawn test (ARTA_R157_DISCOVERY_REFRESH_DISABLE=1)
+      # honors the cookie (API 200) but the SPA CLIENT walls it (login redirect) →
+      # probe captures no_json_responses in ~8s. Fresh discovery requires a freshly
+      # ── R217 — bulk-gen throughput discipline (the rate-limit-collapse fix) ──
+      # Defaults below preserve single-req interactive behavior; these env
+      # values make the throughput levers ACTIVE for the serialized claude_code
+      # bulk-gen path so the full 21-req generate-all COMPLETES instead of
+      # collapsing under the OAuth rate limit (1785 calls / 261 retries / 110×
+      # 429 baseline). All overridable from the shell env.
+      #   0c — honor BMAD-TEA risk-scoring test_types strictly (no keyword
+      #        tool-inflation → fewer per-req LLM gen calls):
+      ARTA_R217_STRICT_TOOL_SCOPE: ${ARTA_R217_STRICT_TOOL_SCOPE:-1}
+      #   0c — cap the retry storms (each attempt = a full multi-tool gen):
+      ARTA_MAX_AUTO_ATTEMPTS: ${ARTA_MAX_AUTO_ATTEMPTS:-2}
+      ARTA_MAX_NEWMAN_ATTEMPTS: ${ARTA_MAX_NEWMAN_ATTEMPTS:-2}
+      #   0b — raise the transient-429 backoff cap to the real reset window:
+      ARTA_R141_D_MAX_DELAY_S: ${ARTA_R141_D_MAX_DELAY_S:-90}
+      #   0b — governor cooldown stamped on transient-429 exhaustion:
+      ARTA_R217_GOVERNOR_COOLDOWN_S: ${ARTA_R217_GOVERNOR_COOLDOWN_S:-90}
+      #   0d — batch the 21 reqs with a recovery window every N reqs:
+      ARTA_GENERATE_ALL_BATCH_SIZE: ${ARTA_GENERATE_ALL_BATCH_SIZE:-5}
+      ARTA_GENERATE_ALL_BATCH_RECOVERY_S: ${ARTA_GENERATE_ALL_BATCH_RECOVERY_S:-90}
+      #   ATDD partial-validity rescue — when the upstream Gherkin gate blocks a
+      #   req but ≥1 fail-first-valid scenario exists, drop only the malformed
+      #   (no-When/Then) scenarios + proceed (re-validated clean) instead of
+      #   zeroing the whole req. Quality-safe (no-Then never ships); coverage-+:
+      ARTA_R217_ATDD_PARTIAL_RESCUE: ${ARTA_R217_ATDD_PARTIAL_RESCUE:-1}
+      #   Multi-tool batch model — sonnet via the serialized CLI was ~9 min/call
+      #   AND produced only 1/5 tool markers; haiku was 28s AND produced the tool.
+      #   Use haiku for the bulk path (~3x faster). Default (unset) = sonnet.
+      ARTA_MULTI_TOOL_MODEL: ${ARTA_MULTI_TOOL_MODEL:-claude-haiku-4-5-20251001}
+      # R154.A — per-route click cap (default 5). Iter-11 evidence at 5
+      # clicks/route × ~25 routes drove the HAR to 214 MB (over R155.A's
+      # 200 MB cap). Lowering to 3 reduces per-route XHR fanout by ~40%
+      # while preserving structural coverage. Combined with R155.A.1's
+      # 300 MB cap, leaves comfortable headroom. PERFORMANCE bound, NOT
+      # safety bound — Layer 1/2/3 of R154.A enforce non-mutation
+      # structurally regardless of this value.
+      ARTA_R154_A_MAX_CLICKS_PER_ROUTE: ${ARTA_R154_A_MAX_CLICKS_PER_ROUTE:-3}
+      # (explicit decision). Unblocks the R168/R154 read-only gate so mutating
+      # POST/PUT/PATCH/DELETE items dispatch. Remove these three to restore the
+      # default non-mutation guarantee.
+      ARTA_R154_ALLOW_DESTRUCTIVE_TESTS: ${ARTA_R154_ALLOW_DESTRUCTIVE_TESTS:-}
+      SUT_TEST_DATA_NAMESPACE: ${SUT_TEST_DATA_NAMESPACE:-}
+      ARTA_R168_GET_ONLY_DISABLE: ${ARTA_R168_GET_ONLY_DISABLE:-}
+      # R152.B — maximum-safety killswitch. When set to "1", the probe
+      # walks ONLY `/` + HARDCODED_ROUTES (no captured/R150.I/org-derived
+      # routes). Use when R150.L+R152.A prefix-skip can't keep up with
+      # arbitrary SPA-crash routes. Trade-off: less DOM catalog depth in
+      # exchange for clean probe completion + HAR finalization.
+      # Default off (preserves full BFS scope). Operator sets to "1" via
+      # `docker compose run -e ARTA_R150_M_HARDCODED_ONLY=1 ...` or
+      # exports in shell env before `docker compose up arta-api`.
+      ARTA_R150_M_HARDCODED_ONLY: ${ARTA_R150_M_HARDCODED_ONLY:-}
+      # R175 — runtime request-chaining for Newman (opt-in). Harvests id-shaped
+      # fields from each response into collection vars, orders list endpoints
+      # before deep ones, seeds the consumed resource-id vars so deep endpoints
+      # resolve real ids at runtime instead of being BLOCKED. Default off.
+      ARTA_R175_CHAIN_ENABLE: ${ARTA_R175_CHAIN_ENABLE:-}
+      # R182 — override the probe's app-entry routes (comma-separated). Used to
+      # while the generic extract_frontend_routes→probe wiring is built.
+      ARTA_R182_APP_ENTRY: ${ARTA_R182_APP_ENTRY:-}
+      OLLAMA_BASE_URL:   ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      ARTA_PRIMARY_MODEL: ${ARTA_PRIMARY_MODEL:-arta-qwen-pro:latest}
+      ARTA_FAST_MODEL:    ${ARTA_FAST_MODEL:-qwen3:8b}
+      ARTA_DEEP_MODEL:    ${ARTA_DEEP_MODEL:-qwen3:32b}
+      ZAP_API_URL:        ${ZAP_API_URL:-http://zap:8080}
+      # R144.E.1 — orphan-sweep TTL. Iter 2 + Iter 3 of R143.F (runs
+      # 1d5b96 + 84c4e8 + 4f5f58) all hit the pre-R144.E hardcoded 75min
+      # ceiling before PW phase persisted results. Bumped to 180min to
+      # absorb full smokes; R144.E.2 heartbeat (execution_results recency)
+      # still protects against genuinely-stuck runs in this larger window.
+      ARTA_ORPHAN_SWEEP_TTL_MIN: ${ARTA_ORPHAN_SWEEP_TTL_MIN:-180}
+      # F3-1: Artifact archive directory (must match the volume mount below)
+      ARTA_ARTIFACTS_DIR: ${ARTA_ARTIFACTS_DIR:-/var/arta/artifacts}
+      ARTA_ARTIFACT_RETENTION_DAYS: ${ARTA_ARTIFACT_RETENTION_DAYS:-30}
+      # NOTE: Sensitive env vars loaded via env_file (.env) only:
+      #   DATABASE_URL, NEO4J_USER, NEO4J_PASSWORD, REDIS_URL, ANTHROPIC_API_KEY,
+      #   ARTA_API_KEY, JWT_SECRET_KEY, JIRA_*, GITHUB_TOKEN, SLACK_WEBHOOK_URL
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:   { condition: service_healthy }
+      neo4j:      { condition: service_healthy }
+      redis:      { condition: service_healthy }
+      chromadb:   { condition: service_started }
+    volumes:
+      - ./src:/app/src
+      - ./.arta:/app/.arta
+      # F3-1: Persistent artifact archive — screenshots, traces, HTML reports survive
+      # container restarts. Pruned on boot per ARTA_ARTIFACT_RETENTION_DAYS (default 30).
+      - ./data/artifacts:/var/arta/artifacts
+    shm_size: '256m'  # Chromium inside Docker needs adequate shared memory
+    # F18-1 / F18-6: Restrict the hot-reload watcher to source dirs only.
+    #
+    # Initial F18-1 used `--reload-exclude 'src/automation/*'` but fnmatch
+    # globs use a single `*` which does NOT cross `/` boundaries — so
+    # nested paths like `src/automation/pytest/analytics/req_am_012_*.py`
+    # still triggered reload and killed mid-run Generate-All jobs at ~12
+    # reqs. F18-6 switches to `--reload-dir` (allowlist mode): uvicorn
+    # only watches these explicit source directories. Everything else
+    # (src/automation/*, src/fixtures/*, .arta/*, data/*, models/*,
+    # frontend/*, tests/*, any JSON/Parquet at repo root) is implicitly
+    # ignored regardless of nesting depth. Source-code edits to the
+    # listed dirs still trigger reload as before.
+    # Fix UU (Phase E): drop --reload. The WatchFiles reloader caused two
+    # production-style failures: (1) reload-mid-run killed the worker
+    # while parallel tools were still draining stdout pipes, leaving
+    # orphan FDs the parent kept reading from forever (verified live —
+    # /proc/14/wchan = "pipe_read" with no subprocess attached after
+    # 26 min of silence in run-0f8ddc); (2) every code edit during a
+    # run aborted the run mid-flight. Production deployments don't use
+    # --reload anyway. For dev iteration on code edits, use
+    # `docker compose restart arta-api` after changes (~3s).
+    command: >-
+      uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      # Fix VV: relaxed timeouts for runs under heavy parallel-subprocess
+      # load. The 5s timeout × 5 retries was tripping when the asyncio loop
+      # was busy spawning Newman + Playwright + chromium-headless during
+      # smoke runs (verified live: container exited cleanly ~20s into runs
+      # in run-0f8ddc / run-8e0836). 30s interval × 15s timeout × 10 retries
+      # gives the loop ~5 min before unhealthy — well past any real run's
+      # subprocess-startup spike.
+      # NOTE: the Dockerfile security-hardening step REMOVES /usr/bin/curl (+
+      # wget, sh, apt, pip) to slim the image — so a curl-based healthcheck
+      # fails with "curl: not found" → 422 failing-streak → container stuck
+      # `unhealthy` → dependents (frontend) refuse to start. Use python (always
+      # present — uvicorn runs on it), matching the Dockerfile's own HEALTHCHECK.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=10).status==200 else 1)"]
+      interval: 30s
+      timeout: 15s
+      retries: 10
+      # Cold-start budget. Tightened from 240s → 120s after:
+      #   - ChromaDB connect retries dropped from 3×2s to 2×1s (src/api/main.py)
+      #   - Service mem_limits keep heaviest services from swap-thrashing
+      # Typical chain on this host:
+      #   Idempotent SQL migrations (4 files, 89 lines) …… ~3-5s
+      #   LLM client probe + Jira/Notifier init …………………… ~5s
+      #   ChromaDB connect (≤1×1s retry + listener spin) … ~2-15s
+      #   Neo4j verify_connectivity + constraint creation … ~30-40s
+      #   Redis ping + project/req sync + retention prune  ~5-10s
+      # `start_period: 180s` absorbs Neo4j cold-boot under load while still
+      # flipping healthy on the first successful probe. Bumped from 120s
+      # by Fix VV (Phase E) for the extra k6 binary download time on cold
+      # cache.
+      start_period: 180s
+    # Cap so the API process can't drag the host into deeper swap when the
+    # machine is already memory-pressured. Tune from `docker stats arta-api`.
+    # R155.A.2 — bumped 2g → 4g to absorb HAR-ingest peak memory. With
+    # `mode:'full' content:'embed'` + R154.A click loop, typical HARs reach
+    # 200-250MB; `json.loads()` peak is ~5-8× file size = ~1.5-2GB transient.
+    # 2GB cap caused mid-ingest OOM-class kills (clean exit by uvicorn
+    # 2026-07-21: 4g ALSO OOM-killed every run — kernel confirmed
+    # `Memory cgroup out of memory: Killed process (uvicorn) anon-rss:~4.18GB`
+    # (Docker reported OOMKilled=false — a cgroup-v2 false-negative). The run
+    # pipeline peaks ~4.2GB in-process (HAR json.loads + spec/req loading), so
+    # 4g had zero headroom. Raised to 8g (host has ~50GiB free). NOTE: the ~4GB
+    # in-process peak is itself a bloat worth trimming (stream the HAR, release
+    # per-tool buffers) — 8g is headroom, not a substitute for that fix.
+    # 2026-08-03: 8g ALSO cgroup-OOM-restarted the combined multi-tool run once
+    # the bulk-regen inventory grew (26 reqs × 6 tools = 1044 tests + discovery
+    # HAR json.loads in the fast stage). Raised to 16g (host has ~65GiB free) so
+    # the full all-tools run completes in one shot. The HAR-streaming trim above
+    # is still the real fix; 16g is headroom for the full-suite mission report.
+    mem_limit: 16g
+    restart: on-failure
+
+  # ── PostgreSQL ────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-arta}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-arta}
+    volumes:
+      - ./data/postgress:/var/lib/postgresql/data
+      - ./src/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-arta} -d ${POSTGRES_DB:-arta}"]
+      interval: 5s
+      timeout: 5s
+      # 30 × 5s = 150s steady-state budget. Cold-start on a fresh volume:
+      #   - initdb + locale init …………………………… ~5s
+      #   - schema.sql replay (large) …………… ~30-60s
+      #   - postgres fast-shutdown after init …… ~20-30s
+      #   - second-boot recovery + ready …………… ~5s
+      # Total: ~60-100s. start_period suppresses failure counting until then.
+      retries: 30
+      start_period: 120s
+    mem_limit: 1g
+    restart: on-failure
+
+  # ── Neo4j (Traceability Graph) ────────────────────────────────────────────
+  neo4j:
+    image: neo4j:5-community
+    ports:
+      - "7474:7474"   # Browser UI
+      - "7687:7687"   # Bolt
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:?NEO4J_PASSWORD is required in .env}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_memory_heap_max__size: 1G
+      NEO4J_dbms_memory_pagecache_size: 512M
+    volumes:
+      - ./data/neo4j:/data
+      - ./src/graph/schema.cypher:/var/lib/neo4j/import/schema.cypher
+    healthcheck:
+      # Auth-free HTTP probe on the discovery endpoint (port 7474). This
+      # is the right primitive because:
+      #   1. The HTTP service comes up AFTER Bolt is ready (so success here
+      #      proves the database is fully online, not just JVM-alive).
+      #   2. It does NOT authenticate — so failed healthchecks (during cold
+      #      boot) won't trigger Neo4j's `auth_max_failed_attempts` lockout
+      #      that locks out the neo4j user across hundreds of attempts.
+      #      Verified live: previous `cypher-shell -u … -p …` healthcheck
+      #      generated 300+ "unauthorized due to authentication failure"
+      #      WARN entries that locked the user mid-deploy, then the volume's
+      #      stored password drifted from the .env value, compounding the
+      #      lockout into a permanent failure.
+      test: ["CMD-SHELL", "wget --quiet --spider --tries=1 --timeout=5 http://localhost:7474/ || exit 1"]
+      interval: 15s
+      timeout: 10s
+      # 30 × 15s = 7.5min window — accommodates cold starts with APOC.
+      retries: 30
+      # Boot is loud for ~2 min; let it finish before we count failures.
+      start_period: 60s
+    # JVM heap is set above to 1G; pagecache to 512M. 2G container limit gives
+    # ~512M headroom for the JVM's off-heap + APOC + native I/O.
+    mem_limit: 2g
+    restart: on-failure
+
+  # ── Redis (message bus + cache + session) ─────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: >
+      sh -c "redis-server
+      ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+    mem_limit: 256m
+    restart: on-failure
+
+  # ── OWASP ZAP (security scanner) ─────────────────────────────────────────
+  # F20-26: Without this, every Run Suite shows Security as SKIPPED because
+  # `_run_zap_scan` probes ZAP_API_URL=http://zap:8080 (default) and gets
+  # DNS-resolution failure since there's no `zap` service. The probe falls
+  # through cleanly per F8-13 / F4-19 but means zero security coverage.
+  # `api.disablekey=true` is OK for dev; for prod, set ZAP_API_KEY env and
+  # remove the disable flag. `api.addrs.addr.regex=true` allows access from
+  # any container (default would be localhost-only and fail).
+  zap:
+    image: zaproxy/zap-stable:latest
+    ports:
+      - "${ZAP_HOST_PORT:-38090}:8080"
+    # host.docker.internal:3010). Without this mapping the ZAP container can't
+    # resolve host.docker.internal → accessUrl 500 → `0/40 endpoints seeded` →
+    # spider/activeScan never start (scan_id=0) → a meaningless "0 URLs, no
+    # alerts" false-pass. Mirrors the arta-api service's extra_hosts.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: >-
+      zap.sh -daemon -host 0.0.0.0 -port 8080
+      -config api.disablekey=true
+      -config api.addrs.addr.name=.*
+      -config api.addrs.addr.regex=true
+    # F20-26 fix-up: image's `sh` is dash, not bash → no /dev/tcp support.
+    # Use curl (already present in the zaproxy image for addon downloads).
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/JSON/core/view/version/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    # R25.Z: 1g was far too small once ZAP actually scans the SUT's real API
+    # surface. After R25.Z seeds the authenticated endpoints, the PASSIVE scanner
+    # analyzes their large JSON responses and the active scanner stores every
+    # request/response — the message store balloons. Kernel dmesg (the source of
+    # truth — Docker's State.OOMKilled=FALSE is a cgroup-v2 FALSE-NEGATIVE, same
+    # trap as the arta-api OOM) showed `ZAP-PassiveScan invoked oom-killer /
+    # Memory cgroup out of memory: Killed process (java)` at anon-rss 1GB (@1g
+    # limit) AND AGAIN at the FULL 4GB (@4g limit). `restart: on-failure` bounced
+    # the container mid-scan, WIPING the seeded Sites tree before the URL/alert
+    # count → false "0 URLs" despite having fetched real endpoints. 8g (host has
+    # ~56g free) gives real headroom. Symptom to watch: zap RestartCount climbing
+    # during a run + "All connection attempts failed" on scan polls → check
+    # `sudo dmesg | grep -i 'killed process.*java'`, NOT Docker's OOMKilled flag.
+    # 8g STILL hit the ceiling on a 2-requirement all-tools run (dmesg: java
+    # killed at anon-rss ~7.6GB — wanted more) — the re-seed resilience recovered
+    # coverage (62 URLs held) but RestartCount climbed. 16g gives the passive
+    # scanner + active-scan message store enough headroom for a clean RC=0 run.
+    mem_limit: 16g
+    restart: on-failure
+
+  # ── ChromaDB (vector store for RAG) ──────────────────────────────────────
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data/chroma:/chroma/chroma
+    environment:
+      ANONYMIZED_TELEMETRY: "false"
+    # C3: ChromaDB image provides bash at /usr/bin/bash (no curl / wget / nc / python3).
+    # Use bash's /dev/tcp virtual socket to verify the server is accepting connections
+    # on :8000 — lightweight, dependency-free, returns exit 0 on success.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "timeout 3 bash -c '</dev/tcp/localhost/8000' 2>/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    mem_limit: 1g
+    restart: on-failure
+
+  # ── ARTA Frontend ─────────────────────────────────────────────────────────
+  arta-frontend:
+    # Build the `dev` stage which already runs `npm ci` (frontend/Dockerfile).
+    # Cold-start `npm install` is now removed from the container command; deps
+    # come from the baked image. When package.json/lock changes, run
+    # `docker compose build arta-frontend` to refresh the deps layer.
+    build:
+      context: ./frontend
+      target: dev
+    working_dir: /app
+    ports:
+      # Host 3001 chronically clashes with other dev servers on this shared host
+      # "bind: address already in use"). Moved to ARTA's high range (next to the
+      # API's 38087); override via ARTA_FRONTEND_HOST_PORT if 38088 ever clashes.
+      - "${ARTA_FRONTEND_HOST_PORT:-38088}:3000"
+    volumes:
+      - ./frontend:/app
+      # Anonymous volume on node_modules so the image-installed deps shadow
+      # the host bind-mount path. Re-populated from the image when the
+      # container is recreated (e.g. after `compose build arta-frontend`).
+      - /app/node_modules
+    command: npm run dev
+    environment:
+      # API calls are proxied through Next.js rewrites (next.config.js)
+      # so no NEXT_PUBLIC_ARTA_API_URL needed — requests go to same origin
+      ARTA_API_INTERNAL_URL: http://arta-api:8000
+    depends_on:
+      arta-api:
+        condition: service_healthy
+    # F5-10: Liveness probe so Docker can detect when Next.js wedges (otherwise
+    # `restart: on-failure` only triggers on hard process exit). Uses wget which
+    # is built into node:20-alpine; pings the root page rather than /api so the
+    # check works even when the API container is briefly down.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    # R234 — the Next.js dev server OOM-killed at 1g while compiling heavy pages
+    # Raise to 2g. The kill recorded exit 0 (cgroup-v2 OOMKilled=true false-negative),
+    # so `restart: on-failure` (non-zero only) never fired and it stayed DOWN — switch
+    # to `unless-stopped` so an OOM-exit-0 still auto-recovers.
+    mem_limit: 2g
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  neo4j_data:
+  redis_data:
+  chroma_data:
+  arta_artifacts:     

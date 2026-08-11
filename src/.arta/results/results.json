@@ -1,0 +1,964 @@
+{
+  "config": {
+    "configFile": "/app/src/automation/common/playwright.base.config.ts",
+    "rootDir": "/app/src/automation/playwright",
+    "forbidOnly": false,
+    "fullyParallel": true,
+    "globalSetup": "/app/src/automation/common/auth-setup.ts",
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {},
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/app/test-results",
+        "repeatEach": 1,
+        "retries": 1,
+        "metadata": {},
+        "id": "",
+        "name": "",
+        "testDir": "/app/src/automation/playwright",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json",
+        {
+          "outputFile": "/app/src/.arta/results/results.json"
+        }
+      ],
+      [
+        "list",
+        null
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "runAgents": "none",
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.58.2",
+    "workers": 2,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "req_bt_001.spec.ts",
+      "file": "req_bt_001.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "REQ-BT-001: Bug CRUD Operations",
+          "file": "req_bt_001.spec.ts",
+          "line": 10,
+          "column": 6,
+          "specs": [
+            {
+              "title": "Page loads and shows bug list",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "b03cb2d639de2cbcf9be-51c845a40b3f09c5f2b8",
+              "file": "req_bt_001.spec.ts",
+              "line": 21,
+              "column": 7
+            },
+            {
+              "title": "Can navigate to create bug form",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "b03cb2d639de2cbcf9be-40c0be7c7e43e95db2b5",
+              "file": "req_bt_001.spec.ts",
+              "line": 29,
+              "column": 7
+            },
+            {
+              "title": "Can fill and submit bug creation form",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "b03cb2d639de2cbcf9be-c6de262a87debe0cb215",
+              "file": "req_bt_001.spec.ts",
+              "line": 41,
+              "column": 7
+            },
+            {
+              "title": "Can view bug details by clicking a bug",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "b03cb2d639de2cbcf9be-35c5f43918263e702391",
+              "file": "req_bt_001.spec.ts",
+              "line": 78,
+              "column": 7
+            },
+            {
+              "title": "Can delete a bug via UI",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "b03cb2d639de2cbcf9be-e13962064cc3e60da25e",
+              "file": "req_bt_001.spec.ts",
+              "line": 90,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "req_bt_002.spec.ts",
+      "file": "req_bt_002.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "REQ-BT-002: Bug Status Workflow",
+          "file": "req_bt_002.spec.ts",
+          "line": 10,
+          "column": 6,
+          "specs": [
+            {
+              "title": "Page loads and displays bug statuses",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "4509bb8e1438f055ce2c-57bbb4126377e2789cbc",
+              "file": "req_bt_002.spec.ts",
+              "line": 20,
+              "column": 7
+            },
+            {
+              "title": "Can navigate to bug detail to see status",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "4509bb8e1438f055ce2c-5b9a4d490cfb5fa67e79",
+              "file": "req_bt_002.spec.ts",
+              "line": 27,
+              "column": 7
+            },
+            {
+              "title": "Can attempt status transition via UI",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "4509bb8e1438f055ce2c-ec724acac07a82f7521c",
+              "file": "req_bt_002.spec.ts",
+              "line": 40,
+              "column": 7
+            },
+            {
+              "title": "Status labels have visual indicators",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "4509bb8e1438f055ce2c-c66bc742ff0484de5f4e",
+              "file": "req_bt_002.spec.ts",
+              "line": 64,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "req_bt_003.spec.ts",
+      "file": "req_bt_003.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "REQ-BT-003: Role-Based Access Control",
+          "file": "req_bt_003.spec.ts",
+          "line": 9,
+          "column": 6,
+          "specs": [
+            {
+              "title": "Page loads and user is authenticated",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "b86c4943b40a77243330-f8d66b8588f2d89aa221",
+              "file": "req_bt_003.spec.ts",
+              "line": 17,
+              "column": 7
+            },
+            {
+              "title": "Logged-in user info is displayed",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "b86c4943b40a77243330-4473fd66980f168697d3",
+              "file": "req_bt_003.spec.ts",
+              "line": 24,
+              "column": 7
+            },
+            {
+              "title": "Admin-specific UI elements are visible",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "b86c4943b40a77243330-1d80ac80f76ffecdd086",
+              "file": "req_bt_003.spec.ts",
+              "line": 36,
+              "column": 7
+            },
+            {
+              "title": "Navigation menu reflects user permissions",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "b86c4943b40a77243330-d05c45b24c4128079a37",
+              "file": "req_bt_003.spec.ts",
+              "line": 45,
+              "column": 7
+            },
+            {
+              "title": "Unauthorized page access redirects or shows error",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "b86c4943b40a77243330-b9e7087f8b31afcfd25d",
+              "file": "req_bt_003.spec.ts",
+              "line": 57,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "req_bt_004.spec.ts",
+      "file": "req_bt_004.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "REQ-BT-004: Comment System",
+          "file": "req_bt_004.spec.ts",
+          "line": 10,
+          "column": 6,
+          "specs": [
+            {
+              "title": "Can navigate to bug detail with comments section",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "b8c714b4520e4b209a02-9ab97527d2839b774d9d",
+              "file": "req_bt_004.spec.ts",
+              "line": 20,
+              "column": 7
+            },
+            {
+              "title": "Comment input area is visible on bug detail",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "b8c714b4520e4b209a02-8dc18f5ef9100bdee17a",
+              "file": "req_bt_004.spec.ts",
+              "line": 35,
+              "column": 7
+            },
+            {
+              "title": "Can type and submit a comment",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "b8c714b4520e4b209a02-41b0d51ffa73f20be662",
+              "file": "req_bt_004.spec.ts",
+              "line": 51,
+              "column": 7
+            },
+            {
+              "title": "Existing comments are displayed",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "b8c714b4520e4b209a02-a115eb1339e96c2758a1",
+              "file": "req_bt_004.spec.ts",
+              "line": 81,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "req_bt_005.spec.ts",
+      "file": "req_bt_005.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "REQ-BT-005: Activity Logs",
+          "file": "req_bt_005.spec.ts",
+          "line": 9,
+          "column": 6,
+          "specs": [
+            {
+              "title": "Page loads successfully",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "8901eab8625ac2464d81-3a6543ae217d483ecc4b",
+              "file": "req_bt_005.spec.ts",
+              "line": 19,
+              "column": 7
+            },
+            {
+              "title": "Activity or history section is visible",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "8901eab8625ac2464d81-29f2054604f5d0c4547e",
+              "file": "req_bt_005.spec.ts",
+              "line": 23,
+              "column": 7
+            },
+            {
+              "title": "Activity entries show timestamps",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "8901eab8625ac2464d81-4a391c836c101563c141",
+              "file": "req_bt_005.spec.ts",
+              "line": 31,
+              "column": 7
+            },
+            {
+              "title": "Bug detail page shows activity history",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "8901eab8625ac2464d81-4b7e958efb9129aaaf1c",
+              "file": "req_bt_005.spec.ts",
+              "line": 46,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "req_bt_006.spec.ts",
+      "file": "req_bt_006.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "REQ-BT-006: Project Dashboard",
+          "file": "req_bt_006.spec.ts",
+          "line": 9,
+          "column": 6,
+          "specs": [
+            {
+              "title": "Dashboard page loads and renders",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "5e72b392cfe5b5212db6-490b658c8329eed25cb8",
+              "file": "req_bt_006.spec.ts",
+              "line": 19,
+              "column": 7
+            },
+            {
+              "title": "Dashboard shows bug statistics or counts",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "5e72b392cfe5b5212db6-cf8c50692ada9df774a4",
+              "file": "req_bt_006.spec.ts",
+              "line": 26,
+              "column": 7
+            },
+            {
+              "title": "Dashboard has filter or search capability",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "5e72b392cfe5b5212db6-7afe8937a6acc82f0281",
+              "file": "req_bt_006.spec.ts",
+              "line": 33,
+              "column": 7
+            },
+            {
+              "title": "Dashboard displays bug list or table",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "5e72b392cfe5b5212db6-258351a210fff838c07f",
+              "file": "req_bt_006.spec.ts",
+              "line": 47,
+              "column": 7
+            },
+            {
+              "title": "Dashboard navigation links work",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "5e72b392cfe5b5212db6-bcca4513caa8331aeabe",
+              "file": "req_bt_006.spec.ts",
+              "line": 54,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "req_bt_007.spec.ts",
+      "file": "req_bt_007.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "REQ-BT-007: Application Health — Page Load",
+          "file": "req_bt_007.spec.ts",
+          "line": 9,
+          "column": 6,
+          "specs": [
+            {
+              "title": "Page loads within 5 seconds",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "33f83c3e49163478167e-df0bfe8a147ff3fdeedc",
+              "file": "req_bt_007.spec.ts",
+              "line": 12,
+              "column": 7
+            },
+            {
+              "title": "Page reaches networkidle state",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "33f83c3e49163478167e-48c52d0af81fc5e8e8bf",
+              "file": "req_bt_007.spec.ts",
+              "line": 21,
+              "column": 7
+            },
+            {
+              "title": "No JavaScript errors on page load",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "33f83c3e49163478167e-9f6977e1f8bbf30942f0",
+              "file": "req_bt_007.spec.ts",
+              "line": 30,
+              "column": 7
+            },
+            {
+              "title": "Page returns valid HTML document",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "33f83c3e49163478167e-a88662d076ff0a3bb191",
+              "file": "req_bt_007.spec.ts",
+              "line": 39,
+              "column": 7
+            },
+            {
+              "title": "Page is responsive after load",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "33f83c3e49163478167e-6bb2689e7bfbb5399fb5",
+              "file": "req_bt_007.spec.ts",
+              "line": 47,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "req_bt_008.spec.ts",
+      "file": "req_bt_008.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "REQ-BT-008: Dark Mode Support",
+          "file": "req_bt_008.spec.ts",
+          "line": 9,
+          "column": 6,
+          "specs": [
+            {
+              "title": "Page loads with a theme applied",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "d33ff0ad159f17af458a-6e082f2abacf614693a7",
+              "file": "req_bt_008.spec.ts",
+              "line": 17,
+              "column": 7
+            },
+            {
+              "title": "Theme toggle is present and clickable",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "d33ff0ad159f17af458a-cdcd6c27976078eeba6f",
+              "file": "req_bt_008.spec.ts",
+              "line": 31,
+              "column": 7
+            },
+            {
+              "title": "Dark mode toggle updates theme class on html/body",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "d33ff0ad159f17af458a-67422bdbbf1e98722db4",
+              "file": "req_bt_008.spec.ts",
+              "line": 44,
+              "column": 7
+            },
+            {
+              "title": "Theme preference persists across page reload",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "d33ff0ad159f17af458a-c896e213aba71ee3645a",
+              "file": "req_bt_008.spec.ts",
+              "line": 66,
+              "column": 7
+            },
+            {
+              "title": "Handles missing theme in localStorage gracefully",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "d33ff0ad159f17af458a-b327def2dc15cef410f9",
+              "file": "req_bt_008.spec.ts",
+              "line": 76,
+              "column": 7
+            },
+            {
+              "title": "Handles invalid theme value in localStorage gracefully",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "d33ff0ad159f17af458a-d82472efd14f6078d44c",
+              "file": "req_bt_008.spec.ts",
+              "line": 84,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-03-25T14:49:35.125Z",
+    "duration": 24.71900000000005,
+    "expected": 0,
+    "skipped": 38,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

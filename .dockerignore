@@ -1,0 +1,169 @@
+# F9-1 / R28-cleanup: Without this file, `docker compose build` was sending
+# ~155 GB of build context to the Docker daemon (models/ alone is 95 GB;
+# data/artifacts/ adds ~80 GB; .git, .venv, node_modules add another ~3 GB).
+# Every rebuild — even for a one-line code change — paid this transfer cost.
+#
+# Strategy: exclude broadly, then re-include explicitly via `!path` if the
+# Dockerfile actually needs it. Defaulting to "exclude" prevents accidents
+# (a stray secrets file landing in the image, a 60GB GGUF balloon, etc.).
+
+# ── Massive ML training artifacts ─────────────────────────────────────────────
+# (only needed in the train target via bind-mount, never copied into the image)
+#
+# Leading slash anchors these to the build context root so we don't
+# accidentally exclude `src/models/` (Python Pydantic source code) or
+# `src/fixtures/` (shared test fixtures).
+/models/
+/data/
+/unsloth_compiled_cache/
+/outputs/
+/fixtures/
+*.gguf
+*.safetensors
+*.bin
+*.pt
+*.ckpt
+
+# ── Local Python venv (image installs from requirements.txt fresh) ────────────
+.venv/
+venv/
+env/
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# ── Node ecosystem (rebuilt inside the frontend Docker stage) ─────────────────
+node_modules/
+frontend/node_modules/
+frontend/.next/
+frontend/.turbo/
+frontend/tsconfig.tsbuildinfo
+.npm/
+*.tsbuildinfo
+.eslintcache
+
+# ── Git metadata (image doesn't need history; build args carry SHA if needed) ─
+.git/
+.gitignore
+.github/
+.gitattributes
+
+# ── IDE + OS noise ─────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Logs + runtime state (operator data, not source) ──────────────────────────
+*.log
+logs/
+tmp/
+
+# Core dumps from chromium probe crashes (R150.L) — a single core.<pid> is
+# multi-GB and was the dominant chunk of a 2.6 GB build context. NOTE:
+# dockerignore patterns are root-anchored, so `**/` is required to match at
+# depth. Bare `core` only under the playwright dir (where chromium runs) to
+# avoid masking a future core/ package.
+**/core.[0-9]*
+/src/automation/playwright/core
+
+# Per-run state + secrets under .arta/ — DEFAULT-DENY (mirrors .gitignore).
+# docker-compose bind-mounts ./.arta over /app/.arta in BOTH dev and prod, so
+# the image's COPY .arta/ only needs the config templates to be self-sufficient.
+# Allow-by-default went stale as new runtime dirs appeared (regen_queue/,
+# runs/, traceability/, architecture_discovery/, github_cache/, ...) and risked
+# baking live auth secrets (storage-state cookies, Postman auth_token JWTs)
+# into images. Anchored to build context root (top-level .arta/) so we don't
+# accidentally exclude any future `src/.arta/` test fixtures.
+/.arta/**
+!/.arta/arta.config.yaml
+!/.arta/projects.example.json
+!/.arta/scenarios/**
+# Secret-free env templates only — NEVER re-include storage-state files or
+!/.arta/environments/staging.json
+!/.arta/environments/bugtrackr-local.json
+
+# ── Generated / quarantined test artifacts ─────────────────────────────────────
+*.broken
+*.broken-*
+*.pre-N.bak
+*.pre-*.bak
+
+# ── Local secrets — never copy these into the image even by accident ──────────
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# ── Test execution artifacts (per-run, regenerable) ───────────────────────────
+test-results/
+playwright-report/
+cypress/videos/
+cypress/screenshots/
+cypress/downloads/
+.nyc_output/
+allure-results/
+allure-report/
+*.har
+zap-report.html
+junit.xml
+junit-*.xml
+
+# Dev/CI tests aren't needed in the production runtime image. Build target
+# `arta-tests` (when present) opts back in via a multi-stage COPY.
+tests/
+**/tests/__pycache__/
+
+# ── Local DB volumes (mounted via docker-compose) ─────────────────────────────
+pgdata/
+neo4j_data/
+chroma_data/
+redis_data/
+*.sqlite3
+*.sqlite3-journal
+
+# ── Docker meta (don't recursively include compose files in build context) ────
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+**/Dockerfile*
+**/.dockerignore
+
+# ── Documentation / decks (image doesn't need MD/HTML/PPTX) ───────────────────
+*.md
+!src/**/*.md
+docs/
+arta-platform.html
+arta-investor-deck.html
+arta-presales-deck.html
+ARTA-Presales-Deck.pptx
+ARTA_ARCHITECTURE.md
+tea-dashboard-prd.md
+
+# ── Plans / scratch / IDE auxiliaries ─────────────────────────────────────────
+.claude/
+.aider*
+.cursor*
+*.orig
+*.rej
+
+# ── CI scaffolding (image doesn't run azure-pipelines / Jenkinsfile) ──────────
+azure-pipelines.yml
+Jenkinsfile
+
+# ── Upskill datasets / archived training data ─────────────────────────────────
+data/upskill/*.jsonl
+data/upskill/_archive/
+data/upskill/_filtered_dataset.jsonl

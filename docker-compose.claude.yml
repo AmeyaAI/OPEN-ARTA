@@ -1,0 +1,15 @@
+# Opt-in overlay: use the Claude Code CLI as ARTA's LLM provider.
+#   docker compose -f docker-compose.yml -f docker-compose.claude.yml up -d
+# Requires a host Node.js (>=20) install that has the `claude` CLI, and a
+# logged-in ~/.claude credentials dir. Set CLAUDE_NODE_DIR to the Node dir
+# whose bin/ contains `claude` (e.g. ~/.nvm/versions/node/v23.5.0).
+services:
+  arta-api:
+    environment:
+      ARTA_LLM_PROVIDER: claude_code
+      CLAUDE_CLI_PATH: /opt/claude-node/bin/claude
+    volumes:
+      - ${CLAUDE_NODE_DIR:?set CLAUDE_NODE_DIR to a Node install dir containing bin/claude}:/opt/claude-node:ro
+      # Read-write so the containerized CLI can refresh its own OAuth token.
+      # Use :ro if you prefer to refresh on the host and accept token-expiry 401s.
+      - ${HOME}/.claude:/home/arta/.claude

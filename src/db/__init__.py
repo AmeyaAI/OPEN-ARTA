@@ -1,0 +1,1 @@
+# ARTA Platform — Database Layer

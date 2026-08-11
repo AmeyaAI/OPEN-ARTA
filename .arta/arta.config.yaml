@@ -1,0 +1,216 @@
+# ARTA Platform Configuration
+# BMAD TEA Methodology — Quality Engineering Automation
+
+platform:
+  name: "ARTA"
+  version: "1.0.0"
+  methodology: "BMAD-TEA"
+
+# ── AI Agent Configuration ─────────────────────────────────────────────────────
+agents:
+  provider:        "ollama"               # Default provider: ollama | anthropic | claude_code
+  base_url:        "http://localhost:11434"
+  model_primary:   "arta-qwen-pro:latest" # Strategy, ATDD, Automation, Defect Analysis (32B Q8_0)
+  model_fast:      "qwen3:8b"             # Quick tasks (selector healing, coverage check, risk JSON)
+  model_deep:      "qwen3:32b"            # Complex root cause analysis
+
+  requirement_intel:
+    enabled: true
+    sources:
+      - jira                              # Jira story integration
+      - github_issues                     # GitHub Issues
+      - confluence                        # Confluence PRDs
+      - openapi                           # OpenAPI spec changes
+      - linear                            # Linear.app
+    auto_extract_ac: true                 # Auto-generate AC from story descriptions
+
+  strategy_architect:
+    enabled: true
+    risk_model:
+      # BMAD TEA: Impact(1-3) × Probability(1-3) = 1-9
+      formula: "impact * probability"
+      scale_impact: "1=Minor, 2=Degraded, 3=Critical"
+      scale_probability: "1=Unlikely, 2=Possible, 3=Likely"
+      score_range: "1-9"
+      auto_block_score: 9            # Score=9 → automatic gate FAIL
+      thresholds:
+        document: "1-3"
+        monitor: "4-5"
+        mitigate: "6-8"
+        auto_fail: "9"
+      p0_threshold: 8               # Score ≥8 → P0
+      p1_threshold: 6               # Score 6-7 → P1
+      p2_threshold: 4               # Score 4-5 → P2
+    auto_prioritize: true
+
+  atdd_designer:
+    enabled: true
+    fail_first: true                      # Enforce red-green ATDD cycle
+    scenario_types:
+      - happy_path
+      - boundary_conditions
+      - negative_cases
+      - security
+      - performance_assertions
+      - idempotency
+      - concurrency
+    gherkin_format: "cucumber"
+
+  automation_engineer:
+    enabled: true
+    tools:
+      ui:          "playwright"
+      api:         "newman"
+      performance: "k6"
+      security:    "owasp-zap"
+      a11y:        "axe-core"
+    self_healing:
+      enabled: true
+      selector_strategy: "data-testid"    # Preferred stable selector
+      auto_pr: true                       # Auto-raise PR with healed selectors
+    generation:
+      require_human_review: true          # Pause pipeline for review before automation
+      auto_pr_on_generation: true         # Push approved scripts to GitHub as PR
+      auto_approve: false                 # If true, skip review gate (CI/CD mode)
+
+  execution:
+    parallel: true
+    max_workers: 8
+    retry_count: 2
+    retry_delay_ms: 1000
+    timeout_ms: 120000
+
+  defect_intel:
+    enabled: true
+    auto_file_jira: true
+    flakiness_detection:
+      min_runs: 5
+      threshold: 0.15                     # > 15% failure rate = flaky
+
+  traceability:
+    enabled: true
+    graph_db: "neo4j"
+    auto_detect_gaps: true
+    auto_detect_orphans: true
+
+# ── Quality Gates ──────────────────────────────────────────────────────────────
+quality_gates:
+  default:
+    coverage:
+      p0: 100
+      p1: 90
+      p2: 75
+      p3: 50
+      overall: 80
+    pass_rate:
+      p0: 100
+      p1: 95
+      overall: 90
+    defects:
+      max_open_p0: 0
+      max_open_p1: 3
+    performance:
+      p95_ms: 3000
+      error_rate_pct: 1.0
+    security:
+      max_critical: 0
+      max_high: 2
+
+  staging:
+    coverage:
+      overall: 70
+    pass_rate:
+      overall: 85
+    defects:
+      max_open_p0: 0
+      max_open_p1: 5
+
+# ── Integrations ───────────────────────────────────────────────────────────────
+integrations:
+  github:
+    enabled: true
+    status_checks: true
+    block_merge_on_gate_fail: true
+    auto_comment_on_pr: true
+
+  jira:
+    enabled: true
+    project_key: "PROJ"
+    auto_file_defects: true
+    link_stories_to_requirements: true
+
+  slack:
+    enabled: true
+    notify_on:
+      - gate_blocked
+      - p0_defect_detected
+      - coverage_gap_detected
+
+  ci_cd:
+    provider: "github_actions"            # github_actions | jenkins | azure_devops
+    pipeline_file: ".github/workflows/arta-quality.yml"
+
+# ── Reporting ──────────────────────────────────────────────────────────────────
+reporting:
+  evidence_storage: "s3"                  # s3 | minio | local
+  retention_days: 90
+  formats:
+    - html
+    - json
+    - junit_xml                           # For CI integration
+
+# ── Feature 2: Suite Definitions ──────────────────────────────────────────────
+suites:
+  smoke:
+    priorities: [P0]
+    max_duration_s: 300
+    description: "Fast gate — P0 critical paths only"
+  regression:
+    priorities: [P0, P1]
+    max_duration_s: 900
+    description: "PR validation — P0+P1 scenarios"
+  full:
+    priorities: [P0, P1, P2, P3]
+    description: "Complete suite — all priorities"
+
+# ── Feature 4: Self-Heal Approval ─────────────────────────────────────────────
+self_healing:
+  require_human_approval: true       # false = auto-raise PR (original behaviour)
+  approval_timeout_hours: 48         # Auto-reject if no action taken
+  min_confidence_for_queue: 0.65     # Below this: discard without queueing
+
+# ── Feature 7: Project Types ──────────────────────────────────────────────────
+project_types:
+  web_app:
+    tools: [playwright, newman, k6, zap]
+    extra_scenarios: [e2e_happy_path, boundary, security_xss, security_sqli, performance_p95]
+  mobile_app:
+    tools: [appium, newman, k6]
+    extra_scenarios: [accessibility, deep_link, offline_mode, push_notification]
+  api_microservice:
+    tools: [newman, k6, zap]
+    extra_scenarios: [contract, schema_validation, idempotency, rate_limit, auth_boundary]
+  analytics:
+    tools: [playwright, newman]
+    assertion_mode: "tolerance"
+    tolerance_pct: 1.0
+    frozen_fixtures: true
+    llm_judge_enabled: true
+    provenance_required: true
+    adversarial_suite: true
+    execution_tiers: [tier1, tier2, tier3]
+    scenario_types:
+      - frozen_data_happy_path
+      - boundary_tolerance
+      - layer_isolation_nl_to_query
+      - layer_isolation_query_to_result
+      - layer_isolation_result_to_insight
+      - layer_isolation_insight_to_narrative
+      - grounding_check
+      - adversarial_ambiguous_metric
+      - adversarial_conflicting_timefilter
+      - adversarial_missing_segment
+      - adversarial_leading_question
+  enterprise_app:
+    tools: [playwright, newman, k6, zap, axe]
+    extra_scenarios: [e2e_happy_path, accessibility_wcag, compliance_audit, sla_gate, security_penetration]

@@ -1,0 +1,108 @@
+# ARTA Production Override
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Phase Final-2 (C4): Removes dev-only flags from the base compose:
+#   - Drops `--reload` (hot-reloading is a dev-only security/perf risk in prod)
+#   - Adds resource limits so a runaway generation can't starve neighbour services
+#   - Sets restart: always (base uses on-failure which won't resurrect after graceful exits)
+#   - Drops source bind mounts so the image content is authoritative
+#
+# Combine with environment/secrets from .env or your secret manager.
+
+services:
+
+  arta-api:
+    # Production command: no --reload, single worker (uvicorn workers can be scaled via --workers)
+    command: >
+      uvicorn src.api.main:app
+      --host 0.0.0.0
+      --port 8000
+      --proxy-headers
+      --forwarded-allow-ips="*"
+      --log-level info
+    # F3-4: ENVIRONMENT=production triggers the runtime guard in main.py that refuses
+    # to start if dev-only flags (e.g. --reload) leak into the prod command.
+    environment:
+      ENVIRONMENT: production
+    # Drop dev bind mounts — image is authoritative
+    volumes:
+      - ./.arta:/app/.arta
+      # F3-1: Persistent artifact archive (same named volume as base compose)
+      - arta_artifacts:/var/arta/artifacts
+      # F6-8: read-only mount — see docker-compose.yml comment.
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  arta-frontend:
+    # F4-2: Build the multi-stage frontend Dockerfile (runtime stage = slim
+    # standalone Next.js bundle, no npm needed at runtime). Replaces the
+    # previous `image: node:20-alpine` + ad-hoc `npm ci && npm run build && npm run start`.
+    build:
+      context: ./frontend
+      target: runtime
+    image: arta-frontend:prod
+    # Drop the inline command — the Dockerfile's CMD is `node server.js`.
+    command: []
+    # Drop the dev bind mount — runtime image is authoritative.
+    volumes: []
+    environment:
+      NODE_ENV: production
+    # F5-10: Explicit healthcheck so `restart: always` only restarts on real
+    # failure (not on healthy steady state). Mirrors the base-compose check.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+  # F5-10: Healthchecks below are inherited from docker-compose.yml (deep merge).
+  # Keeping the section structure as-is so future overrides remain trivially additive.
+  postgres:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+
+  neo4j:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+
+  redis:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  chromadb:
+    restart: always
+    # chromadb healthcheck now passes (see base compose)
+    depends_on: []
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G

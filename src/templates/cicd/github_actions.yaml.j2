@@ -1,0 +1,101 @@
+# Fix TTT — ARTA Quality Pipeline (per-project Jinja template)
+# Generated for project {{ project_name }} ({{ project_id }})
+# Auto-derived from project.integrations.recommended_tools + project.quality_gates.
+name: ARTA Quality Pipeline
+
+on:
+{%- for trigger in triggers %}
+{%- if trigger == "push" %}
+  push:
+    branches:
+{%- for b in branch_patterns %}
+      - {{ b }}
+{%- endfor %}
+{%- elif trigger == "pull_request" %}
+  pull_request:
+    branches:
+{%- for b in branch_patterns %}
+      - {{ b }}
+{%- endfor %}
+{%- elif trigger == "manual" %}
+  workflow_dispatch:
+{%- elif trigger == "schedule" %}
+  schedule:
+    - cron: '{{ schedule_cron }}'
+{%- endif %}
+{%- endfor %}
+
+env:
+  ARTA_API_URL: {{ arta_api_url }}
+  ARTA_PROJECT_ID: {{ project_id }}
+  ARTA_API_KEY: ${{ '{{' }} secrets.ARTA_API_KEY {{ '}}' }}
+
+jobs:
+  arta-quality:
+    name: ARTA Quality Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      matrix:
+        environment:
+{%- for env in environments %}
+          - {{ env.name }}
+{%- endfor %}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install ARTA CLI
+        run: npm install -g @arta/cli
+
+      - name: Sync Requirements
+        run: arta sync-requirements --project ${{ '{{' }} env.ARTA_PROJECT_ID {{ '}}' }}
+
+{% for tool in test_tools %}
+      - name: Run {{ tool|capitalize }} Tests
+        run: arta run --tool {{ tool }} --env ${{ '{{' }} matrix.environment {{ '}}' }}
+        continue-on-error: true
+{% endfor %}
+
+      - name: Quality Gate Decision
+        id: gate
+        run: |
+          DECISION=$(arta gate-decision --project ${{ '{{' }} env.ARTA_PROJECT_ID {{ '}}' }} --format json)
+          echo "decision=$(echo $DECISION | jq -r '.decision')" >> $GITHUB_OUTPUT
+          echo "score=$(echo $DECISION | jq -r '.quality_score')" >> $GITHUB_OUTPUT
+
+      - name: Enforce Gate Thresholds
+        run: |
+          if [ "${{ '{{' }} steps.gate.outputs.decision {{ '}}' }}" = "FAIL" ]; then
+            echo "::error::ARTA gate FAILED — quality_score ${{ '{{' }} steps.gate.outputs.score {{ '}}' }}"
+            exit 1
+          fi
+          if [ "${{ '{{' }} steps.gate.outputs.decision {{ '}}' }}" = "CONCERNS" ]; then
+            echo "::warning::ARTA gate CONCERNS — quality_score ${{ '{{' }} steps.gate.outputs.score {{ '}}' }}"
+{%- if min_score %}
+            if [ "${{ '{{' }} steps.gate.outputs.score {{ '}}' }}" -lt "{{ min_score }}" ]; then
+              exit 1
+            fi
+{%- endif %}
+          fi
+
+      - name: Upload Evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arta-evidence-${{ '{{' }} matrix.environment {{ '}}' }}
+          path: .arta/evidence/
+
+{% if notify_channels %}
+      - name: Notify On Failure
+        if: failure()
+        run: |
+{%- for channel in notify_channels %}
+          arta notify --channel "{{ channel }}" --status failed
+{%- endfor %}
+{%- endif %}

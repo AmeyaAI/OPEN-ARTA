@@ -1,0 +1,78 @@
+// Fix TTT — ARTA Quality Pipeline (per-project Jinja template)
+// Generated for project {{ project_name }} ({{ project_id }})
+pipeline {
+    agent any
+
+    environment {
+        ARTA_API_URL = '{{ arta_api_url }}'
+        ARTA_PROJECT_ID = '{{ project_id }}'
+        ARTA_API_KEY = credentials('arta-api-key')
+    }
+
+{%- if "schedule" in triggers %}
+    triggers {
+        cron('{{ schedule_cron }}')
+    }
+{%- endif %}
+
+    stages {
+        stage('Checkout') {
+            steps { checkout scm }
+        }
+
+        stage('Setup') {
+            steps {
+                sh 'npm install -g @arta/cli'
+            }
+        }
+
+        stage('Sync Requirements') {
+            steps { sh 'arta sync-requirements --project ${ARTA_PROJECT_ID}' }
+        }
+
+{% for tool in test_tools %}
+        stage('Run {{ tool|capitalize }}') {
+            steps {
+                catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') {
+{%- for env in environments %}
+                    sh 'arta run --tool {{ tool }} --env {{ env.name }}'
+{%- endfor %}
+                }
+            }
+        }
+{% endfor %}
+
+        stage('Quality Gate') {
+            steps {
+                script {
+                    def gate = sh(script: "arta gate-decision --project ${ARTA_PROJECT_ID} --format json", returnStdout: true).trim()
+                    def json = readJSON text: gate
+                    def decision = json.decision ?: 'UNKNOWN'
+                    def score = json.quality_score ?: 0
+                    echo "ARTA gate: ${decision} (score=${score})"
+                    if (decision == 'FAIL') {
+                        error "ARTA gate FAILED — quality_score ${score}"
+                    }
+{%- if min_score %}
+                    if (decision == 'CONCERNS' && score < {{ min_score }}) {
+                        error "ARTA gate CONCERNS below threshold ({{ min_score }})"
+                    }
+{%- endif %}
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: '.arta/evidence/**', allowEmptyArchive: true
+        }
+{%- if notify_channels %}
+        failure {
+{%- for channel in notify_channels %}
+            sh 'arta notify --channel "{{ channel }}" --status failed'
+{%- endfor %}
+        }
+{%- endif %}
+    }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "arta-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "check:api-sync": "cd .. && if [ -x .venv/bin/python ]; then .venv/bin/python -m pytest tests/unit/test_fe_be_api_sync.py -q; else echo 'SKIP check:api-sync — needs the repo Python venv (.venv) at repo root; run on the host or in CI, not the node-only frontend container. (CI already runs it via `pytest tests/unit`.)'; fi"
+  },
+  "dependencies": {
+    "next": "14.2.18",
+    "react": "^18",
+    "react-dom": "^18",
+    "d3": "^7.9.0",
+    "recharts": "^2.13.0"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "@types/node": "^20",
+    "@types/d3": "^7.4.3",
+    "eslint": "^8",
+    "eslint-config-next": "14.2.18",
+    "tailwindcss": "^3.4.0",
+    "postcss": "^8.4.0",
+    "autoprefixer": "^10.4.0"
+  }
+}

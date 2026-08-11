@@ -1,0 +1,56 @@
+{
+  "_README": [
+    "F6-3: This is a TEMPLATE. Copy to projects.json and fill in real values.",
+    "projects.json is gitignored — never commit your real version.",
+    "The API auto-creates projects.json on first run if missing; this template",
+    "exists so contributors know what shape the file takes."
+  ],
+  "00000000-0000-0000-0000-000000000000": {
+    "id": "00000000-0000-0000-0000-000000000000",
+    "name": "Example Project",
+    "description": "Replace with your project description",
+    "color": "#6366f1",
+    "icon": "\ud83d\ude80",
+    "project_type": "web_app",
+    "llm_config": {
+      "provider": "ollama",
+      "model": "qwen3:8b",
+      "api_key": "",
+      "base_url": "",
+      "temperature": 0.2,
+      "max_tokens": 4096
+    },
+    "quality_gates": {
+      "p0_coverage_pct": 100.0,
+      "p1_coverage_pct": 90.0,
+      "p2_coverage_pct": 75.0,
+      "overall_coverage_pct": 80.0,
+      "p0_pass_rate_pct": 100.0,
+      "overall_pass_rate_pct": 90.0,
+      "performance_p95_ms": 3000,
+      "max_open_p0_defects": 0,
+      "max_critical_security_findings": 0
+    },
+    "integrations": {
+      "github_repo": "your-org/your-repo",
+      "github_token": "REPLACE_WITH_YOUR_PAT_OR_LEAVE_EMPTY",
+      "jira_project": "",
+      "jira_api_token": "",
+      "slack_webhook_url": "",
+      "base_url": "http://localhost:3000",
+      "repositories": []
+    },
+    "environments": {
+      "local": {
+        "base_url": "http://localhost:3000",
+        "api_base_url": "http://localhost:3000/api",
+        "auth": {
+          "method": "none",
+          "credentials": {}
+        },
+        "variables": {},
+        "roles": []
+      }
+    }
+  }
+}
