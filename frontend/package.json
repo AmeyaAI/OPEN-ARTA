@@ -10,7 +10,7 @@
     "check:api-sync": "cd .. && if [ -x .venv/bin/python ]; then .venv/bin/python -m pytest tests/unit/test_fe_be_api_sync.py -q; else echo 'SKIP check:api-sync — needs the repo Python venv (.venv) at repo root; run on the host or in CI, not the node-only frontend container. (CI already runs it via `pytest tests/unit`.)'; fi"
   },
   "dependencies": {
-    "next": "14.2.18",
+    "next": "15.5.21",
     "react": "^18",
     "react-dom": "^18",
     "d3": "^7.9.0",
