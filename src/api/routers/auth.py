@@ -136,7 +136,6 @@ async def ensure_bootstrap_admin() -> None:
                 "full_name": "Bootstrap Admin",
                 "is_active": True,
                 "is_admin": True,
-                "role": "admin",
             })
             if _pwd_ctx:
                 user.hashed_password = _pwd_ctx.hash(password)
