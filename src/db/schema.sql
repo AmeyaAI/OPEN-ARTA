@@ -768,10 +768,10 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
 
--- Seed admin user (password set via API or migration; hashed_password NULL until first login)
-INSERT INTO users (email, full_name, is_admin, is_active)
-VALUES ('admin@arta.dev', 'ARTA Admin', TRUE, TRUE)
-ON CONFLICT (email) DO NOTHING;
+-- No seed admin: the first admin is created at startup by ensure_bootstrap_admin()
+-- when the users table is empty and ARTA_BOOTSTRAP_ADMIN_EMAIL/PASSWORD are set
+-- (or use ARTA_DEMO_MODE=1 for a no-DB demo login). A NULL-password seed row here
+-- would leave the table non-empty and defeat that bootstrap.
 CREATE INDEX IF NOT EXISTS idx_test_case_versions_test_id ON test_case_versions(test_id);
 
 -- ── Requirement Versioning & Change Detection ───────────────────────────
