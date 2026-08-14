@@ -1,0 +1,31 @@
+# Name-based customer scan using the DENYLIST secret. Runs ONLY in a trusted
+# context (push to protected branches) — NOT on pull_request, because GitHub
+# withholds secrets from fork PRs (the agnostic-guard covers PRs instead).
+name: Denylist Guard
+on:
+  push:
+    branches: [main, 'release/**']
+permissions:
+  contents: read          # least-privilege
+jobs:
+  denylist-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Name-based scan (secret list, output redacted)
+        env:
+          DENYLIST: ${{ secrets.DENYLIST }}
+        run: |
+          set -uo pipefail
+          [ -n "${DENYLIST:-}" ] || { echo "DENYLIST secret not set — see the private sync runbook"; exit 1; }
+          umask 077; printf '%s\n' "$DENYLIST" > "$RUNNER_TEMP/dl.txt"
+          fail=0
+          while read -r f; do
+            [ -f "$f" ] || continue
+            m=$(grep -nHiE -f "$RUNNER_TEMP/dl.txt" "$f" 2>/dev/null \
+                 | grep -viE 'dpod-labs-private-limited|dpod labs' | cut -d: -f1,2 || true)
+            [ -n "$m" ] && { echo "denylist hit: $m"; fail=1; }
+          done < <(git ls-files)
+          rm -f "$RUNNER_TEMP/dl.txt"
+          [ "$fail" = 0 ] && echo "PASS" \
+            || { echo "FAIL: customer name detected (locations above; content redacted)"; exit 1; }

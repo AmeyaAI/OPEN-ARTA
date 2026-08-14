@@ -1,0 +1,32 @@
+# Fork-SAFE customer-data scan: runs on ALL PRs incl. forks (needs NO secret).
+# Catches emails + private IPs that would leak an UNREGISTERED customer — the
+# real guard against external PRs (which GitHub denies secrets to).
+name: Agnostic Guard
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read          # least-privilege
+jobs:
+  agnostic-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Scan for emails + private IPs (output is location-only / redacted)
+        run: |
+          set -uo pipefail
+          EMAIL_RE='[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+          EMAIL_ALLOW='@example\.|\.example\.|@arta\.dev|@anthropic\.com|@(users\.noreply\.)?github\.com|@localhost|@company\.com$|@izs\.me$|@router\.|a@b\.com$|y@z\.com$|x@y\.com$|nobody@nowhere\.dev$'
+          PRIVIP_RE='\b(10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|192\.168\.[0-9]{1,3}\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3})\b'
+          PRIVIP_ALLOW='\b10\.0\.0\.1\b|\b192\.168\.1\.4\b|172\.16\.0\.0/12'
+          fail=0
+          while read -r f; do
+            [ -f "$f" ] || continue
+            em=$(grep -nHoE "$EMAIL_RE" "$f" 2>/dev/null | grep -viE "$EMAIL_ALLOW" | cut -d: -f1,2 || true)
+            [ -n "$em" ] && { echo "email hit: $em"; fail=1; }
+            ip=$(grep -nHE "$PRIVIP_RE" "$f" 2>/dev/null | grep -vE "$PRIVIP_ALLOW" | cut -d: -f1,2 || true)
+            [ -n "$ip" ] && { echo "private-ip hit: $ip"; fail=1; }
+          done < <(git ls-files)
+          [ "$fail" = 0 ] && echo "PASS: no agnostic hits" \
+            || { echo "FAIL: potential customer data (locations above; content redacted)"; exit 1; }
