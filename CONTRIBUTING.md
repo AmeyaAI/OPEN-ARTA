@@ -17,8 +17,9 @@ Thanks for helping build the independent verification layer for AI-era software.
 
 ## Contributor License Agreement
 
-We use a lightweight CLA (via cla-assistant, prompted automatically on your
-first PR). It confirms you have the right to contribute your changes and
+We use a lightweight CLA ([docs/CLA.md](docs/CLA.md)), enforced by the CLA
+Assistant workflow — on your first PR you'll be prompted to sign with a single
+PR comment. It confirms you have the right to contribute your changes and
 grants DPOD Labs the rights needed to keep licensing flexible. Your copyright
 stays yours.
 
