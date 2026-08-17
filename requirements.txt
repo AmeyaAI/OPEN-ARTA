@@ -9,7 +9,7 @@ transformers>=4.40.0       # For upskill model integration
 
 # Web framework
 fastapi>=0.115.0
-uvicorn[standard]>=0.32.0
+uvicorn[standard]>=0.52.3
 python-multipart>=0.0.20
 
 # Database drivers
