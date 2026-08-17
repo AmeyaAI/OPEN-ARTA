@@ -467,7 +467,14 @@ async def reactivate_user(user_id: str, current_user=Depends(require_admin)):
 
 @router.get("/users/{user_id}/projects", summary="List project roles for a user")
 async def user_projects(user_id: str, current_user: dict = Depends(get_current_user)):
-    if not current_user.get("is_admin") and current_user.get("id") != user_id:
+    # get_current_user returns a dict (mock mode) OR a User ORM object (DB mode)
+    # — same duality handled at :76. Calling .get() on the ORM object raised
+    # AttributeError → 500 on every frontend poll of /users/{id}/projects.
+    _is_admin = (current_user.get("is_admin") if isinstance(current_user, dict)
+                 else getattr(current_user, "is_admin", False))
+    _uid = (current_user.get("id") if isinstance(current_user, dict)
+            else getattr(current_user, "id", ""))
+    if not _is_admin and str(_uid) != str(user_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     from ..db_adapter import try_db

@@ -78,7 +78,8 @@ def normalize_endpoint_key(raw: str) -> str:
     return f"{method.upper()}:{path or '/'}" if path else raw
 
 
-async def upsert_test_entries(neo4j_driver: Any, test_entries: list[dict]) -> None:
+async def upsert_test_entries(neo4j_driver: Any, test_entries: list[dict],
+                              _retry: bool = True) -> None:
     """G2.5: MERGE each test + its requirement into Neo4j.
 
     Non-blocking: any Neo4j error is logged and swallowed — test generation must
@@ -146,6 +147,14 @@ async def upsert_test_entries(neo4j_driver: Any, test_entries: list[dict]) -> No
                         log.debug("graph: AC edge upsert failed for %s: %s", ac_id, exc)
         log.info("graph: upserted %d test nodes + edges", len(test_entries))
     except Exception as exc:
+        # Neo4j TransientErrors (lock deadlocks when gate-time traceability
+        # edges and architecture upserts land concurrently — observed live on
+        # all idempotent MERGEs: one backoff retry before giving up.
+        if _retry and ("TransientError" in f"{exc}" or "Deadlock" in f"{exc}"):
+            import asyncio as _aio_retry
+            log.info("graph: transient Neo4j error — retrying upsert_test_entries once")
+            await _aio_retry.sleep(0.5)
+            return await upsert_test_entries(neo4j_driver, test_entries, _retry=False)
         log.warning("graph: upsert skipped (Neo4j unavailable?): %s", exc)
 
 

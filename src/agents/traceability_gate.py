@@ -410,6 +410,32 @@ def assess_traceability(test_paths: set[str], impl_paths: set[str] | None = None
     }
 
 
+# ── R330 P1d — per-test grounding provenance (extracted from the tests.py gate
+# so it is unit-testable and evidence-preserving) ────────────────────────────
+
+_PROV_STRENGTH = {"source_grounded": 5, "human_corrected": 4,
+                  "requirement_declared": 3, "observed": 2, "unlabeled": 1}
+
+
+def derive_grounded_by(test_endpoint_count: int, matched_keys: list,
+                       cap_by_key: dict) -> str:
+    """Honest grounding provenance for ONE test.
+
+    `cap_by_key` maps "METHOD:path" → the FULL captured-endpoint dict (not just
+    its `source` string) so evidence-only endpoints (source_har/discovered_at,
+    no `source`) rank as `observed` — the synthetic {"source": best} rebuild
+    lost that branch and understated grounding.
+    """
+    from .api_discovery import endpoint_provenance
+    if not test_endpoint_count:
+        return "ui"                     # no API endpoints — nothing to ground
+    if not matched_keys:
+        return "guess"                  # hits endpoints ARTA never captured
+    provs = [endpoint_provenance(cap_by_key.get(k) or {}) for k in matched_keys]
+    best = max(provs, key=lambda p: _PROV_STRENGTH.get(p, 0))
+    return "guess" if best == "unlabeled" else best
+
+
 # ── persistence + completeness metric ────────────────────────────────────────
 
 def _safe(s: str) -> str:
@@ -424,6 +450,34 @@ def persist_traceability(project_id: str, test_id: str, req_id: str, result: dic
             {"test_id": test_id, "req_id": req_id, **result}, indent=2))
     except Exception:
         pass
+
+
+def prune_traceability(project_id: str, req_id: str, keep_test_ids: set) -> int:
+    """R330 P1d — sediment control. The store is append-only across regens, so
+    rows for tests that no longer exist keep voting in read_traceability (they
+    showed as `unknown` grounded_by). After a requirement's gate pass, drop that
+    requirement's rows whose test_id is not in the current batch.
+    Killswitch: ARTA_TRACE_PRUNE_DISABLE=1. Returns rows removed."""
+    import os
+    if os.environ.get("ARTA_TRACE_PRUNE_DISABLE") == "1":
+        return 0
+    removed = 0
+    d = _TRACE_DIR / project_id
+    if not d.is_dir():
+        return 0
+    keep = {str(t) for t in (keep_test_ids or set())}
+    for p in d.glob("*.json"):
+        try:
+            row = json.loads(p.read_text())
+        except Exception:
+            continue
+        if str(row.get("req_id")) == str(req_id) and str(row.get("test_id")) not in keep:
+            try:
+                p.unlink()
+                removed += 1
+            except Exception:
+                pass
+    return removed
 
 
 def read_traceability(project_id: str) -> dict:
@@ -447,6 +501,13 @@ def read_traceability(project_id: str) -> dict:
     # operator sees how well-grounded the generated tests are, not just traceable %.
     from collections import Counter as _Counter
     grounded_by = _Counter(r.get("grounded_by") or "unknown" for r in rows)
+    # R330 P1d — per-generation source-grounding status distribution (fail-loud
+    # surfacing: "unavailable:no_github_token" etc. stamped by the gate).
+    src_status = _Counter(r["source_grounding"] for r in rows if r.get("source_grounding"))
+    # Distinct "needs attention" count for the panel CTA: a `guess` test is
+    # usually ALSO flagged untraceable — summing the two double-counted.
+    needs_attention = sum(1 for r in rows
+                          if not r.get("traceable") or r.get("grounded_by") == "guess")
     return {
         "project_id": project_id,
         "test_count": n,
@@ -455,4 +516,6 @@ def read_traceability(project_id: str) -> dict:
         "potentially_incorrect": flagged[:50],
         "potentially_incorrect_count": len(flagged),
         "grounded_by": dict(grounded_by),
+        "source_grounding": dict(src_status),
+        "needs_attention_count": needs_attention,
     }

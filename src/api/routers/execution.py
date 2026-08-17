@@ -8006,7 +8006,10 @@ def _r312_params_from_captured_paths(
             or os.environ.get("ARTA_R312_CAPTURED_PARAM_DISABLE") == "1"):
         return out
     try:
-        from ...agents.api_discovery import _load_captured_endpoints
+        # R330 P2b — the mining algorithm moved to api_discovery.mine_path_param_values
+        # so gen's param_constraint_block and this dispatch resolver share ONE
+        # implementation (router imports agent, never the reverse).
+        from ...agents.api_discovery import _load_captured_endpoints, mine_path_param_values
         captured = _load_captured_endpoints(project_id) or []
     except Exception:
         return out
@@ -8018,30 +8021,12 @@ def _r312_params_from_captured_paths(
     paths: list[str] = []
     for e in captured:
         p = e.get("path") if isinstance(e, dict) else (e if isinstance(e, str) else None)
-        if isinstance(p, str) and p.startswith("/"):
-            paths.append(p.split("?")[0].rstrip("/"))
-    templated = [p for p in paths if "{" in p]
-    concrete = [p for p in paths if "{" not in p]
-    for tp in templated:
-        tsegs = tp.split("/")
-        tparam_pos = {i: seg[1:-1] for i, seg in enumerate(tsegs)
-                      if seg.startswith("{") and seg.endswith("}")}
-        if not tparam_pos:
-            continue
-        # only params the caller actually needs (by normalized name)
-        if not any(_norm(pn) in want for pn in tparam_pos.values()):
-            continue
-        for cp in concrete:
-            csegs = cp.split("/")
-            if len(csegs) != len(tsegs):
-                continue
-            if any(tsegs[i] != csegs[i] for i in range(len(tsegs)) if i not in tparam_pos):
-                continue
-            for i, pname in tparam_pos.items():
-                val = csegs[i]
-                np = _norm(pname)
-                if np in want and want[np] not in out and val and "{" not in val:
-                    out[want[np]] = val
+        if isinstance(p, str):
+            paths.append(p)
+    for pname, val in mine_path_param_values(paths).items():
+        np = _norm(pname)
+        if np in want and want[np] not in out:
+            out[want[np]] = val
     return out
 
 
@@ -9468,8 +9453,51 @@ async def _run_newman(
         run_id, _cookie_name or "<missing>", len(_cookie_value or ""),
     )
 
+    # R330 P5 — (collection basename, AC-seq) → canonical test_cases.test_id map,
+    # the Newman analogue of the PW linkage maps (Part 6C/R310/R312). Newman items
+    # carry the AC in their NAMES ("AC-1 Happy Path — …") but rows minted synthetic
+    # ids that can never equal a test_cases.test_id → execution_results.test_case_id
+    # was 100% NULL for Newman (deliberately: never mislink). Same collision guard
+    # as R312: an ambiguous (basename, seq) is dropped, not guessed.
+    _newman_cmap: dict[tuple[str, int], str] = {}
+    try:
+        from ...db.session import async_session_factory as _asf_nm
+        from sqlalchemy import text as _t_nm
+        _nm_basenames = {c.name for c in collections}
+        async with _asf_nm() as _sess_nm:
+            _nm_rows = (await _sess_nm.execute(_t_nm("""
+                SELECT test_id, script_path, metadata->>'ac_id' AS ac_txt
+                FROM test_cases
+                WHERE script_path IS NOT NULL AND automation_tool = 'newman'
+            """))).all()
+        _nm_collided: set[tuple[str, int]] = set()
+        for _r in _nm_rows:
+            if not _r.script_path:
+                continue
+            _bn = Path(_r.script_path).name
+            if _bn not in _nm_basenames:
+                continue
+            _seq = _ac_seq_key(getattr(_r, "ac_txt", None))
+            if _seq is None:
+                continue
+            _sk = (_bn, _seq)
+            if _sk in _newman_cmap and _newman_cmap[_sk] != _r.test_id:
+                _nm_collided.add(_sk)
+            else:
+                _newman_cmap[_sk] = _r.test_id
+        for _sk in _nm_collided:
+            _newman_cmap.pop(_sk, None)
+        if _newman_cmap:
+            log.info("R330 P5: Newman canonical map built — %d (collection, AC-seq) keys",
+                     len(_newman_cmap))
+    except Exception as _nm_exc:
+        log.debug("R330 P5: Newman canonical map skipped: %s", _nm_exc)
+
     for collection_file in collections:
         collection_name = collection_file.stem
+        # R330 P5 — the ORIGINAL basename (test_cases.script_path points here);
+        # collection_file gets reassigned to R174/R168 sidecars during processing.
+        _orig_coll_fname = collection_file.name
         results_path = ARTIFACTS_DIR / f"newman-{run_id}-{collection_name}.json"
         patched_collection: Path | None = None  # temp file for cookie-auth patching
 
@@ -9526,7 +9554,9 @@ async def _run_newman(
                         "title": f"{collection_name} :: {_item_name}",
                         "duration_ms": 0,
                         "automation_tool": "newman",
-                        "test_id": f"{collection_name}-{_item_name}",
+                        "test_id": _newman_canonical_test_id(
+                            _orig_coll_fname, _item_name, _newman_cmap,
+                            f"{collection_name}-{_item_name}"),
                         "error_message": f"{_err_prefix} Hint: {_hint[:200]}",
                         "metadata": {
                             "blocked_reason": _block_kind,
@@ -9578,7 +9608,9 @@ async def _run_newman(
                             "title": f"{collection_name} :: {_nm}",
                             "duration_ms": 0,
                             "automation_tool": "newman",
-                            "test_id": f"{collection_name}-{_nm}",
+                            "test_id": _newman_canonical_test_id(
+                                _orig_coll_fname, _nm, _newman_cmap,
+                                f"{collection_name}-{_nm}"),
                             "error_message": (
                                 "R300: streaming/NL-analytics endpoint "
                                 "(response-stream/SSE) — not Newman-testable; covered "
@@ -9681,7 +9713,9 @@ async def _run_newman(
                             "title": f"{collection_name} :: {_item_name}",
                             "duration_ms": 0,
                             "automation_tool": "newman",
-                            "test_id": f"{collection_name}-{_item_name}",
+                            "test_id": _newman_canonical_test_id(
+                                _orig_coll_fname, _item_name, _newman_cmap,
+                                f"{collection_name}-{_item_name}"),
                             "error_message": (
                                 f"R69.2 openapi_placement_drift: body has "
                                 f"{_misplaced} but OpenAPI spec declares those "
@@ -9803,7 +9837,9 @@ async def _run_newman(
                 if _r168_blocked:
                     for _bn, _bm, _bp in _r168_blocked:
                         _REAL_RESULTS.setdefault(run_id, []).append({
-                            "test_id": f"{collection_name}-{_bn}"[:120],
+                            "test_id": _newman_canonical_test_id(
+                                _orig_coll_fname, _bn, _newman_cmap,
+                                f"{collection_name}-{_bn}"[:120]),
                             "title": f"[API] {_bm} {_bp}",
                             "status": "BLOCKED",
                             "duration_ms": 0,
@@ -10489,7 +10525,11 @@ async def _run_newman(
                                         f"Assertion failed on HTTP {_r112_b_status}: "
                                         + "; ".join(_r304b_names[:5])
                                     )
-                        api_test_id = f"API-{collection_name}-{item_name[:20]}"
+                        # R330 P5 — canonical test_cases.test_id when the item's
+                        # AC-token resolves; else the legacy synthetic id (NULL FK).
+                        api_test_id = _newman_canonical_test_id(
+                            _orig_coll_fname, item_name, _newman_cmap,
+                            f"API-{collection_name}-{item_name[:20]}")
                         # R55.7 — extract endpoint_key from this item's
                         # request and stamp it into metadata.endpoint_keys.
                         # _build_params projects the row's `metadata` dict
@@ -10951,6 +10991,44 @@ async def _run_k6(
 
     log.info("Running %d k6 scripts for run %s", len(k6_scripts), run_id)
 
+    # R330 P5b — (script basename, AC-seq) → canonical test_cases.test_id map,
+    # the k6 analogue of the Newman map: gen wraps k6 checks in AC-named
+    # group() blocks, so per-AC rows can resolve to real test cases (same
+    # collision-guarded machinery; unresolvable → synthetic id → NULL FK).
+    _k6_cmap: dict[tuple[str, int], str] = {}
+    try:
+        from ...db.session import async_session_factory as _asf_k6
+        from sqlalchemy import text as _t_k6
+        _k6_basenames = {s.name for s in k6_scripts}
+        async with _asf_k6() as _sess_k6:
+            _k6_rows = (await _sess_k6.execute(_t_k6("""
+                SELECT test_id, script_path, metadata->>'ac_id' AS ac_txt
+                FROM test_cases
+                WHERE script_path IS NOT NULL AND automation_tool = 'k6'
+            """))).all()
+        _k6_collided: set[tuple[str, int]] = set()
+        for _r in _k6_rows:
+            if not _r.script_path:
+                continue
+            _bn = Path(_r.script_path).name
+            if _bn not in _k6_basenames:
+                continue
+            _seq = _ac_seq_key(getattr(_r, "ac_txt", None))
+            if _seq is None:
+                continue
+            _sk = (_bn, _seq)
+            if _sk in _k6_cmap and _k6_cmap[_sk] != _r.test_id:
+                _k6_collided.add(_sk)
+            else:
+                _k6_cmap[_sk] = _r.test_id
+        for _sk in _k6_collided:
+            _k6_cmap.pop(_sk, None)
+        if _k6_cmap:
+            log.info("R330 P5b: k6 canonical map built — %d (script, AC-seq) keys",
+                     len(_k6_cmap))
+    except Exception as _k6m_exc:
+        log.debug("R330 P5b: k6 canonical map skipped: %s", _k6m_exc)
+
     for script_file in k6_scripts:
         script_name = script_file.stem
         # R75.1 — extract endpoint_keys from the k6 script's http.X calls
@@ -11335,6 +11413,51 @@ async def _run_k6(
                     ),
                 },
             })
+
+            # R330 P5b — per-AC k6 rows from --summary-export's root_group. Gen
+            # wraps checks in group('AC-…') blocks; each AC-named group becomes
+            # ONE row whose test_id resolves to the canonical test_cases.test_id
+            # via the (basename, AC-seq) map — closing the k6 side of the NULL
+            # test_case_id spine. The aggregate PERF row above is unchanged
+            # (script-level perf verdict). Killswitch ARTA_R330_K6_AC_ROWS_DISABLE=1.
+            if (os.environ.get("ARTA_R330_K6_AC_ROWS_DISABLE") != "1"
+                    and summary_path.exists()):
+                try:
+                    _r330_sum = json.loads(summary_path.read_text())
+                    _rg = (_r330_sum or {}).get("root_group") or {}
+                    _groups = _rg.get("groups") or {}
+                    _giter = list(_groups.values()) if isinstance(_groups, dict) else list(_groups)
+                    for _g in _giter:
+                        if not isinstance(_g, dict):
+                            continue
+                        _gname = str(_g.get("name") or "")
+                        if not _NEWMAN_AC_TOKEN_RE.search(_gname):
+                            continue
+                        _gchecks = _g.get("checks") or {}
+                        _citer = (list(_gchecks.values())
+                                  if isinstance(_gchecks, dict) else list(_gchecks))
+                        _gp = sum(int(_c.get("passes") or 0) for _c in _citer if isinstance(_c, dict))
+                        _gf = sum(int(_c.get("fails") or 0) for _c in _citer if isinstance(_c, dict))
+                        if _gp + _gf == 0:
+                            continue
+                        _REAL_RESULTS[run_id].append({
+                            "test_id": _newman_canonical_test_id(
+                                script_file.name, _gname, _k6_cmap,
+                                f"PERF-{script_name}-{_gname[:40]}"),
+                            "title": f"[Performance] {_gname}",
+                            "status": "PASS" if _gf == 0 else "FAIL",
+                            "duration_ms": 0,
+                            "automation_tool": "k6",
+                            "script_path": str(script_file),
+                            "error_message": (
+                                None if _gf == 0 else
+                                f"{_gf}/{_gp + _gf} checks failed in this AC group"),
+                            "metadata": {"r330_k6_ac_row": True,
+                                         "checks_passes": _gp, "checks_fails": _gf},
+                        })
+                except Exception as _k6ac_exc:
+                    log.debug("R330 P5b: k6 per-AC rows skipped for %s: %s",
+                              script_name, _k6ac_exc)
 
             # Phase K4 — record per-script step so the timeline + per-endpoint
             # p95 panels show data. Pre-K4 the production _run_k6 path emitted
@@ -14527,11 +14650,18 @@ def _render_unified_report(run_id: str, run_data: dict, test_results: list[dict]
                    f'{"" if _cnt == 1 else "s"})</span>') if _cnt else ""
             rows.append(f'<span class="tk">Test Case</span><span class="tv">—{_cx}</span>')
 
-        # Test Script — canonical source path (identity).
+        # Test Script — canonical source path (identity). R330 P5: gate on the
+        # file EXISTING (the _lin_data_harness pattern) — this was the one row in
+        # a never-fabricate panel that could print a synthesized path not on disk.
         _dir, _sfx, _ext = _SCRIPT_DIR_EXT.get(tool, (tool, "", "txt"))
         _stem = raw if (not _sfx or raw.endswith(_sfx)) else f"{raw}{_sfx}"
-        rows.append(f'<span class="tk">Test Script</span><span class="tv">'
-                    f'src/automation/{_dir}/{_html.escape(_stem)}.{_ext}</span>')
+        _script_rel = f"src/automation/{_dir}/{_stem}.{_ext}"
+        if Path(_script_rel).is_file():
+            rows.append(f'<span class="tk">Test Script</span><span class="tv">'
+                        f'{_html.escape(_script_rel)}</span>')
+        else:
+            rows.append('<span class="tk">Test Script</span><span class="tv">—'
+                        ' <span class="tk">(no script file on disk)</span></span>')
 
         # Data Harness — the raw per-run artifact file.
         _dh = _lin_data_harness(tr, tool, meta, raw)
@@ -14998,6 +15128,36 @@ def _spec_to_requirement_id(spec_filename: str) -> str | None:
     if _mk:
         return f"{_mk.group(1).upper()}-{_mk.group(2)}"
     return None
+
+
+# Matches the FULL AC token ("AC-1", "AC-607-01", "ac_002"); the seq is the
+# LAST number WITHIN the token — live SUTs name items "AC-<req>-<seq>"
+# ("AC-607-01" → seq 1, not 607), while trailing digits OUTSIDE the token
+# ("AC-2 Get order 123") must still be ignored.
+_NEWMAN_AC_TOKEN_RE = re.compile(r"\bAC[-_ ]?((?:\d+[-_])*\d+)\b", re.IGNORECASE)
+
+
+def _newman_canonical_test_id(
+    collection_file_name: str, item_name: str,
+    cmap: dict | None, default: str,
+) -> str:
+    """R330 P5 — resolve a Newman item row to the canonical test_cases.test_id
+    via (collection basename, AC seq extracted from the item NAME). Matches the
+    explicit `AC-<n>` token only — item names may contain other digits, so the
+    last-number heuristic _ac_seq_key applies to AC-ID strings would mislink
+    'AC-2 Get order 123'. Falls back to the legacy synthetic id, which
+    guarantees a NULL test_case_id rather than a wrong one."""
+    try:
+        if cmap:
+            m = _NEWMAN_AC_TOKEN_RE.search(item_name or "")
+            if m:
+                seq = int(re.findall(r"\d+", m.group(1))[-1])
+                tid = cmap.get((collection_file_name, seq))
+                if tid:
+                    return tid
+    except Exception:
+        pass
+    return default
 
 
 def _ac_seq_key(ac_id: str | None) -> int | None:

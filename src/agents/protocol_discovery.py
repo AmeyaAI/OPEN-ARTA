@@ -34,6 +34,48 @@ _GQL_INTROSPECTION_QUERY = (
 )
 
 
+def classify_protocol(path: str, content_type: str | None = None, summary: str = "") -> str:
+    """Heuristic, zero-LLM protocol classification for a captured endpoint.
+
+    R330 P3 — moved here from architecture_discovery (its private
+    `_classify_protocol`) so automation_engineer can classify backend routes
+    WITHOUT importing architecture_discovery (which itself imports from
+    AutomationEngineerAgent — a cycle). architecture_discovery re-imports this
+    under its old name; this module is the single source of truth.
+
+    C1 (2026-07-25, charter conformance) — the prior version misclassified the example SUT's
+    real SSE endpoint `.../query-engine/event/response-stream` as REST and could not
+    see SOAP/XML (.NET) or SignalR at all. Added `response-stream`/`streaming` SSE
+    tokens + SOAP + SignalR branches, all with word-ish boundary guards so tokens
+    like `asset`/`assetsmodule`/`github` don't false-match `sse`/`soap`/`hub`.
+    SOAP requires a SOAP-SPECIFIC marker (not a bare `xml` content-type)."""
+    blob = f"{path or ''} {summary or ''}".lower()
+    ct = (content_type or "").lower()
+    # SOAP — SOAP-specific markers only (never a bare application/xml, which REST uses)
+    if ("soap+xml" in ct or "?wsdl" in blob or ".asmx" in blob
+            or "soapaction" in blob or "soap:envelope" in blob or "/soap" in blob):
+        return "soap"
+    # SSE — event-stream mime OR a streaming path token (bounded to avoid 'asset'→'sse')
+    if ("text/event-stream" in ct or "eventsource" in blob
+            or "response-stream" in blob or "event-stream" in blob
+            or re.search(r"(^|[/_.-])sse([/_.-]|$)", blob)
+            or re.search(r"(^|[/_.-])streaming([/_.-]|$)", blob)):
+        return "sse"
+    # .NET SignalR — negotiate handshake / hub route / explicit 'signalr' word
+    if ("/negotiate" in blob
+            or re.search(r"(^|[/_.\s-])signalr([/_.\s-]|$)", blob)
+            or re.search(r"(^|[/_.-])hubs?([/_.-]|$)", blob)):
+        return "signalr"
+    if "graphql" in blob:
+        return "graphql"
+    if path and (str(path).startswith("ws") or "/ws" in blob or "websocket" in blob
+                 or re.search(r"(^|[/_.-])socket([/_.-]|$)", blob)):
+        return "websocket"
+    if "grpc" in blob or (".v1." in blob and "/grpc" in blob):
+        return "grpc"
+    return "rest"
+
+
 def parse_graphql_introspection(data: dict) -> dict:
     """Extract operations + types from a GraphQL introspection result.
 
@@ -87,7 +129,13 @@ _PROTO_MSG_RE = re.compile(r"\bmessage\s+(\w+)\s*\{")
 
 
 def parse_proto(text: str) -> dict:
-    """Parse a `.proto` file into services/methods/messages (gRPC schema)."""
+    """Parse a `.proto` file into services/methods/messages (gRPC schema).
+
+    NOTE (R330 P3, reviewed): automation_engineer._r156_f_parse_proto_* look
+    similar but are NOT duplicates — they extract per-FIELD detail (name/type/
+    tag/rule, per-direction streaming) for request-body synthesis; this parser
+    is a name-level census for the architecture graph. Keep both; consumers
+    differ in fidelity needs."""
     if not text:
         return {"services": [], "messages": []}
     services = []

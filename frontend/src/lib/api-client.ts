@@ -228,11 +228,13 @@ export interface TestCase {
   error?: string
 }
 
-export async function fetchTests(params?: { priority?: string; tool?: string; project_id?: string }) {
+export async function fetchTests(params?: { priority?: string; tool?: string; project_id?: string; flag?: string }) {
   const qs = new URLSearchParams()
   if (params?.priority) qs.set('priority', params.priority)
   if (params?.tool) qs.set('tool', params.tool)
   if (params?.project_id) qs.set('project_id', params.project_id)
+  // R330 P1d — gate-stamped metadata filter (potentially_incorrect | guess | needs_attention)
+  if (params?.flag) qs.set('flag', params.flag)
   const query = qs.toString() ? `?${qs}` : ''
   return request<{ tests: TestCase[]; total: number }>(`/api/tests${query}`)
 }
@@ -1745,12 +1747,11 @@ export async function fetchArchitectureSummary(projectId: string) {
   return request<ArchitectureSummary>(`/api/discovery/projects/${projectId}/architecture`)
 }
 
-// R330 (SUT-Understanding P1) — how well-grounded ARTA's SUT understanding is.
+// R330 (SUT-Understanding P1/P1d) — how well-grounded ARTA's SUT understanding is.
 export interface GroundingCoverage {
   project_id: string
   total_endpoints: number
   by_provenance: Record<string, number>
-  by_source: Record<string, number>
   grounded_endpoints: number
   grounded_pct: number
   source_grounded_endpoints?: number
@@ -1760,8 +1761,14 @@ export interface GroundingCoverage {
     grounded_by?: Record<string, number>
     potentially_incorrect_count?: number
     traceability_pct?: number | null
+    // P1d — gen-time fail-loud statuses ("unavailable:no_github_token" → count)
+    source_grounding?: Record<string, number>
+    // P1d — distinct guess ∪ flagged (the old guess+flagged sum double-counted)
+    needs_attention_count?: number
   }
   source_grounding_available?: boolean
+  // P1d — component flags behind source_grounding_available
+  source_grounding?: { token_available?: boolean; repo_configured?: boolean }
   note?: string
   disabled?: boolean
 }

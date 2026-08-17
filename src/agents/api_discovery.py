@@ -336,7 +336,8 @@ async def _try_github_routes(project: dict) -> list[dict]:
 
     # Detect response types (SSE, MCP, WebSocket)
     for ep in all_endpoints:
-        ep["response_type"] = _detect_response_type_from_code(all_code_context, ep.get("service", ""))
+        ep["response_type"] = _detect_response_type_from_code(
+            all_code_context, ep.get("service", ""), path=str(ep.get("path") or ""))
 
     # Detect auth flow from accumulated code
     _detected_auth = _detect_auth_flow(all_code_context)
@@ -516,15 +517,34 @@ def _detect_auth_flow(code_context: str) -> dict:
     return detected
 
 
-def _detect_response_type_from_code(code_context: str, service: str) -> str:
-    """Detect the response type for a service based on code patterns."""
+def _detect_response_type_from_code(code_context: str, service: str, path: str = "") -> str:
+    """Detect the response type for a service based on code patterns.
+
+    R330 P3 — pre-fix this grepped the ENTIRE code context, so ONE
+    StreamingResponse anywhere marked every endpoint of the service `sse`
+    (false-positive source). When `path` is given and its last meaningful
+    segment appears in the context, streaming/WS markers are honored only
+    within a ±40-line window around those mentions. When the path never
+    appears, the service-level heuristic remains (no better evidence)."""
     service_lower = service.lower()
     if "mcp" in service_lower or "analytics" in service_lower:
         if re.search(r"FastMCP|mcp.*server|sse_client", code_context, re.IGNORECASE):
             return "mcp"
-    if re.search(r"StreamingResponse|text/event-stream", code_context, re.IGNORECASE):
+    scoped = code_context
+    seg = ""
+    if path:
+        segs = [s for s in str(path).split("/")
+                if s and not (s.startswith("{") or s.isdigit())]
+        seg = segs[-1] if segs else ""
+    if seg and code_context:
+        lines = code_context.splitlines()
+        hits = [i for i, ln in enumerate(lines) if seg.lower() in ln.lower()]
+        if hits:
+            scoped = "\n".join(
+                "\n".join(lines[max(0, i - 40):i + 40]) for i in hits[:20])
+    if re.search(r"StreamingResponse|text/event-stream", scoped, re.IGNORECASE):
         return "sse"
-    if re.search(r"WebSocket|websocket", code_context, re.IGNORECASE):
+    if re.search(r"WebSocket|websocket", scoped, re.IGNORECASE):
         return "websocket"
     return "json"
 
@@ -729,8 +749,21 @@ def persist_openapi_doc(project_id: str, endpoints: list[dict]) -> None:
             path, method = e.get("path"), (e.get("method") or "get").lower()
             if not path:
                 continue
-            doc["paths"].setdefault(path, {}).setdefault(method, {"summary": "arta-openapi-ingested"})
+            # R330 P2b — stub ops are TAGGED so param mining can tell them from
+            # ops the SUT's real contract declared (stubs carry no parameters).
+            doc["paths"].setdefault(path, {}).setdefault(
+                method, {"summary": "arta-openapi-ingested", "x-arta-stub": True})
+        # R330 P2b — preserve the file mtime: openapi_cache treats file age as
+        # spec freshness (24h TTL). Every stub merge used to touch the mtime, so
+        # a stub-diluted doc NEVER expired and the SUT's real spec (with the
+        # param constraints P2a mines) was never re-fetched.
+        _prev_stat = p.stat() if p.exists() else None
         p.write_text(json.dumps(doc, indent=2))
+        if _prev_stat is not None:
+            try:
+                os.utime(p, (_prev_stat.st_atime, _prev_stat.st_mtime))
+            except Exception:
+                pass
         _R206_MATCHER_CACHE.pop(project_id, None)   # invalidate cached matchers
     except Exception as exc:
         log.debug("E-OpenAPI: persist_openapi_doc failed for %s: %s", project_id, exc)
@@ -1485,9 +1518,10 @@ def save_captured_endpoints(project_id: str, endpoints: list[dict]) -> None:
             cur = by_key[key]
             # Bump evidence count
             cur["evidence_count"] = int(cur.get("evidence_count") or 1) + int(ep.get("evidence_count") or 1)
-            # Keep latest shape if provided
+            # Keep latest shape if provided (R330 P3: + protocol, so non-REST
+            # classification survives the merge instead of being dropped)
             for shape_key in ("request_body_shape", "response_body_shape", "status",
-                              "content_type", "discovered_at", "source_har"):
+                              "content_type", "discovered_at", "source_har", "protocol"):
                 if ep.get(shape_key) is not None:
                     cur[shape_key] = ep[shape_key]
             # R160.B — union query-param names across observations
@@ -1736,6 +1770,9 @@ def revert_human_correction(
 _R330_PROVENANCE_RANK = {
     "github": 6, "openapi": 6, "manual": 5, "human_correction": 5,
     "requirement": 3, "network": 2,
+    # R330 P1d — probe-captured response evidence IS runtime observation; without
+    # this entry it ranked 0 and real probe traffic was counted "unlabeled".
+    "r212_probe_response_capture": 2,
 }
 
 
@@ -1749,7 +1786,7 @@ def endpoint_provenance(endpoint: dict) -> str:
         return "human_corrected"
     if src == "requirement":
         return "requirement_declared"
-    if src == "network":
+    if src in ("network", "r212_probe_response_capture"):
         return "observed"
     # No explicit `source`, but real HAR-capture evidence (the HAR-harvest write
     # path stamps source_har/discovered_at, not source="network") → it WAS observed
@@ -1843,6 +1880,10 @@ def openapi_param_details(project_id: str) -> dict:
         for method, op in methods.items():
             if method.lower() not in _HTTP_METHODS or not isinstance(op, dict):
                 continue
+            # R330 P2b — ARTA-merged stub ops (persist_openapi_doc) are not the
+            # SUT's contract; only ops the real spec declared may ground params.
+            if op.get("x-arta-stub") or op.get("summary") == "arta-openapi-ingested":
+                continue
             raw = list(common) + list(op.get("parameters") or [])
             details: list = []
             for prm in raw:
@@ -1879,6 +1920,7 @@ def enrich_endpoints_with_openapi_params(project_id: str, endpoints: list[dict])
     for key, det in detail_map.items():
         m, _, pth = key.partition(" ")
         contract.append((m, [s for s in pth.split("/") if s], det))
+    filled: list[dict] = []
     for e in endpoints:
         if not isinstance(e, dict) or e.get("params_detail"):
             continue
@@ -1890,8 +1932,104 @@ def enrich_endpoints_with_openapi_params(project_id: str, endpoints: list[dict])
             if all((cs.startswith("{") and cs.endswith("}")) or cs.lower() == es.lower()
                    for cs, es in zip(segs, esegs)):
                 e["params_detail"] = det
+                filled.append(e)
                 break
+    # R330 P2b — persist the mined constraints onto the EXISTING store entries so
+    # validators/dispatch/dashboards see the same constraints gen does (they were
+    # re-mined transiently on every call; params_detail was 0 on disk everywhere).
+    # Annotates only entries already in the store — adds no endpoint, so the
+    # S2/R305 write-gates (which guard PATH admission) are not bypassed.
+    if filled:
+        try:
+            persist_params_detail(project_id, filled)
+        except Exception as exc:
+            log.debug("R330 P2b: params_detail persist skipped: %s", exc)
     return endpoints
+
+
+def persist_params_detail(project_id: str, endpoints: list[dict]) -> int:
+    """R330 P2b — write `params_detail` onto matching EXISTING entries of the
+    captured-endpoint store (keyed by method+path). Never adds entries; never
+    overwrites a non-empty params_detail. Returns entries updated."""
+    path = _CAPTURED_DIR / f"{project_id}.json"
+    if not path.exists():
+        return 0
+    try:
+        data = json.loads(path.read_text())
+    except Exception:
+        return 0
+    if not isinstance(data, list):
+        return 0
+    det_by_key = {
+        f"{(e.get('method') or 'GET').upper()}:{e.get('path')}": e["params_detail"]
+        for e in endpoints
+        if isinstance(e, dict) and e.get("path") and e.get("params_detail")
+    }
+    updated = 0
+    for entry in data:
+        if not isinstance(entry, dict) or entry.get("params_detail"):
+            continue
+        key = f"{(entry.get('method') or 'GET').upper()}:{entry.get('path')}"
+        if key in det_by_key:
+            entry["params_detail"] = det_by_key[key]
+            updated += 1
+    if updated:
+        path.write_text(json.dumps(data, indent=2))
+    return updated
+
+
+def mine_path_param_values(paths: list[str]) -> dict[str, str]:
+    """R330 P2b — {param_name: concrete_value} mined by matching a TEMPLATED
+    captured path (`…/servers/{serverId}`) against a CONCRETE sibling of
+    identical shape (`…/servers/server-1f9983ab`) and reading the differing
+    segment. Algorithm lifted from dispatch's R312.B resolver so gen and
+    dispatch share ONE miner (single source of truth); dispatch's
+    _r312_params_from_captured_paths now delegates here."""
+    clean: list[str] = []
+    for p in paths or []:
+        if isinstance(p, str) and p.startswith("/"):
+            clean.append(p.split("?")[0].rstrip("/"))
+    templated = [p for p in clean if "{" in p]
+    concrete = [p for p in clean if "{" not in p]
+    out: dict[str, str] = {}
+    for tp in templated:
+        tsegs = tp.split("/")
+        tparam_pos = {i: seg[1:-1] for i, seg in enumerate(tsegs)
+                      if seg.startswith("{") and seg.endswith("}")}
+        if not tparam_pos:
+            continue
+        for cp in concrete:
+            csegs = cp.split("/")
+            if len(csegs) != len(tsegs):
+                continue
+            if any(tsegs[i] != csegs[i] for i in range(len(tsegs)) if i not in tparam_pos):
+                continue
+            for i, pname in tparam_pos.items():
+                val = csegs[i]
+                if pname not in out and val and "{" not in val:
+                    out[pname] = val
+    return out
+
+
+def select_param_relevant_endpoints(
+    captured: list, gherkin_text: str, top_n: int = 20,
+) -> tuple[list, dict]:
+    """R330 P2b — the Gherkin-relevance filter for the param block, with a
+    TRUTHFUL fallback + counters. The original substring filter had no
+    fallback, so a non-matching Gherkin emptied a fully-known constraint set
+    SILENTLY (indistinguishable from "nothing known"). When the filter empties
+    a non-empty set, fall back to the capped endpoints that actually CARRY
+    constraints. Returns (endpoints, {"known": n, "relevant": n[, "fallback": n]})."""
+    gwords = {w.lower() for w in re.findall(r"[A-Za-z_]{4,}", gherkin_text or "")}
+    eps = [e for e in (captured or []) if isinstance(e, dict)]
+    rel = [e for e in eps
+           if any(w in (e.get("path") or "").lower() for w in gwords)]
+    stats = {"known": len(eps), "relevant": len(rel)}
+    if not rel and eps:
+        rel = [e for e in eps
+               if e.get("params_detail") or e.get("query_params")][:top_n]
+        stats["fallback"] = len(rel)
+    return rel, stats
 
 
 def param_constraint_block(
@@ -1914,6 +2052,11 @@ def param_constraint_block(
     Killswitch ARTA_R330_PARAM_CONSTRAINTS_DISABLE=1."""
     if os.environ.get("ARTA_R330_PARAM_CONSTRAINTS_DISABLE") == "1":
         return ""
+    # R330 P2b — path-param example values mined from concrete captured siblings
+    # (the SAME miner dispatch uses to resolve ARTA_PP_*): grounds the URL itself
+    # at gen time instead of leaving `${process.env.ARTA_PP_X || ''}` → 404.
+    _mined = mine_path_param_values(
+        [e.get("path") for e in (endpoints or []) if isinstance(e, dict)])
     req_lines: list[str] = []
     resp_lines: list[str] = []
     for e in (endpoints or [])[:max_endpoints]:
@@ -1969,6 +2112,14 @@ def param_constraint_block(
                 else:
                     continue
             seen.add(nm)
+        # R330 P2b — concrete example value for each {param} in THIS path.
+        if "{" in (path or ""):
+            for seg in path.split("/"):
+                if seg.startswith("{") and seg.endswith("}"):
+                    pname = seg[1:-1]
+                    if pname and pname not in seen and pname in _mined:
+                        rp.append(f"{pname}(path)=e.g. {_mined[pname]}")
+                        seen.add(pname)
         if rp:
             req_lines.append(f"{method} {path} — " + " | ".join(rp))
         fp: list[str] = []
@@ -3211,6 +3362,11 @@ def format_endpoints_for_prompt(endpoints: list[dict], project_vars: dict | None
                 line += " [NO AUTH]"
             if ep.get("response_type") and ep["response_type"] != "json":
                 line += f" [{ep['response_type'].upper()}]"
+            # R330 P3 — surface non-REST protocol so gen picks the right call
+            # convention (graphql POST body, SSE/WS helpers) instead of a
+            # plain REST request that can never succeed.
+            if ep.get("protocol") and ep["protocol"] != "rest":
+                line += f" [protocol: {ep['protocol']}]"
             lines.append(line)
 
     if len(endpoints) > max_entries:

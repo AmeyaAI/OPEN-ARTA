@@ -661,9 +661,30 @@ async def list_tests(
     tool: str | None = None,
     requirement_id: str | None = None,
     project_id: str | None = None,
+    flag: str | None = None,
 ):
-    """List test cases with optional filters."""
+    """List test cases with optional filters.
+
+    R330 P1d — `flag` filters on gate-stamped metadata so the SUT-understanding
+    panel CTA can deep-link the exact tests needing attention:
+    `potentially_incorrect` | `guess` | `needs_attention` (union of both).
+    """
     from ..db_adapter import try_db
+
+    def _flag_match(t: dict) -> bool:
+        meta = t.get("metadata") or {}
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except Exception:
+                meta = {}
+        if flag == "potentially_incorrect":
+            return bool(meta.get("potentially_incorrect"))
+        if flag == "guess":
+            return meta.get("grounded_by") == "guess"
+        if flag == "needs_attention":
+            return bool(meta.get("potentially_incorrect")) or meta.get("grounded_by") == "guess"
+        return True  # unknown flag value — no filtering (fail-open for listing)
 
     async with try_db() as db:
         if db:
@@ -751,6 +772,8 @@ async def list_tests(
             # the Architecture page's per-req `test_count` sum. Dropping
             # the dedup gives a true file-count semantic that matches
             # what's on disk.
+            if flag:
+                tests = [t for t in tests if _flag_match(t)]
             safe_tests = json.loads(json.dumps(tests, default=str))
             return {"tests": safe_tests, "total": len(safe_tests)}
 
@@ -771,6 +794,8 @@ async def list_tests(
         tests = [t for t in tests if t["tool"] == tool.lower()]
     if requirement_id:
         tests = [t for t in tests if t["requirement_id"] == requirement_id.upper()]
+    if flag:
+        tests = [t for t in tests if _flag_match(t)]
     # F20-1: Removed title-based dedup (mock fallback path) for the same
     # reason as the DB path above — title collisions across tools (axe
     # vs playwright vs newman testing the same AC) are legitimate
@@ -4776,6 +4801,11 @@ async def generate_tests(body: GenerateRequest, request: Request):
     for _te in generated_tests:
         _tool = (_te.get("tool") or "").lower()
         _path = (_te.get("script_path") or "").lower()
+        # axe specs live as *_a11y.spec.ts under playwright/ BY DESIGN (the axe
+        # runtime is the PW runner + axe assertions — R213.K.17); the substring
+        # check false-warned on every a11y row of every gen.
+        if _tool == "axe" and "_a11y" in _path:
+            continue
         if _tool and _path and _tool not in _path:
             log.warning(
                 "tool/script_path mismatch for %s: tool=%s but path=%s — "
@@ -5496,15 +5526,19 @@ async def generate_tests(body: GenerateRequest, request: Request):
                     _ungroundable = bool(_em.get("ungroundable"))
             _impl = implementing_paths(_captured, combined_gherkin)  # legacy fallback
 
-            # R330 P1b — per-test grounding provenance. `key → strongest source`
-            # from the store lets each test be labeled honestly: source_grounded /
-            # human_corrected / requirement_declared / observed, or `guess` when it
-            # hits an endpoint ARTA never captured, or `ui` when it has no API.
-            from ...agents.api_discovery import endpoint_provenance, _R330_PROVENANCE_RANK
+            # R330 P1b/P1d — per-test grounding provenance. Key → FULL endpoint
+            # dict (not just `source`) so evidence-only endpoints (source_har/
+            # discovered_at) rank as observed; derivation extracted to
+            # traceability_gate.derive_grounded_by (unit-testable).
+            from ...agents.traceability_gate import derive_grounded_by, prune_traceability
             _cap_by_key = {
-                f"{e.get('method')}:{e.get('path')}": str(e.get('source') or '')
+                f"{e.get('method')}:{e.get('path')}": e
                 for e in (_captured or []) if isinstance(e, dict) and e.get('path')
             }
+            # R330 P1d — the gen-time source-grounding status (fail-loud): stamp it
+            # per test so it persists with the gate verdicts and reaches the panel.
+            _src_grounding = (getattr(auto_agent, "_r330_source_grounding_status", None)
+                              if 'auto_agent' in locals() else None)
 
             _flagged = 0
             _blocked = 0
@@ -5528,21 +5562,18 @@ async def generate_tests(body: GenerateRequest, request: Request):
                     _test_exercises[_tid] = _res["matched_endpoint_keys"]
                 _t.setdefault("metadata", {})
                 _t["metadata"]["traceability"] = _res
-                # R330 P1b — stamp the honest grounding provenance of THIS test.
+                # R330 P1b/P1d — stamp the honest grounding provenance of THIS test
+                # (evidence-preserving derivation, see traceability_gate).
                 _mk = _res.get("matched_endpoint_keys") or []
-                if _res.get("test_endpoint_count", 0) == 0:
-                    _gb = "ui"                       # no API endpoints — nothing to ground
-                elif not _mk:
-                    _gb = "guess"                    # hits endpoints ARTA never captured
-                else:
-                    _srcs = [_cap_by_key.get(k, "") for k in _mk]
-                    _best = max(_srcs, key=lambda s: _R330_PROVENANCE_RANK.get(s, 0), default="")
-                    _gb = endpoint_provenance({"source": _best}) if _best else "guess"
-                # Into `_res` so persist_traceability persists it (the DB persist at
-                # _persist_tests_to_db already ran; the traceability store is the
-                # durable home for the gate's per-test verdicts) AND onto metadata.
+                _gb = derive_grounded_by(_res.get("test_endpoint_count", 0), _mk, _cap_by_key)
+                # Into `_res` so persist_traceability persists it (the traceability
+                # store is the durable home for gate verdicts) AND onto metadata
+                # (P1d: also written back to the DB post-gate, see below).
                 _res["grounded_by"] = _gb
                 _t["metadata"]["grounded_by"] = _gb
+                if _src_grounding:
+                    _res["source_grounding"] = _src_grounding
+                    _t["metadata"]["source_grounding"] = _src_grounding
                 if _code_api_links:
                     _t["metadata"]["code_api_links"] = _code_api_links
                 if not _res["traceable"]:
@@ -5559,6 +5590,44 @@ async def generate_tests(body: GenerateRequest, request: Request):
                 if _pid:
                     persist_traceability(_pid, _t.get("id") or _t.get("test_id") or "?",
                                          body.requirement_id, _res)
+            # R330 P1d — sediment prune: drop THIS requirement's rows for tests not
+            # in the current batch (regen leftovers voted as `unknown` forever).
+            if _pid:
+                try:
+                    _pruned = prune_traceability(
+                        _pid, body.requirement_id,
+                        {str(_t.get("id") or _t.get("test_id")) for _t in generated_tests})
+                    if _pruned:
+                        log.info("[%s] R330 P1d traceability prune: %d stale rows removed",
+                                 body.requirement_id, _pruned)
+                except Exception as _pr_exc:
+                    log.debug("traceability prune skipped: %s", _pr_exc)
+            # R330 P1d — write grounded_by / potentially_incorrect / source_grounding
+            # back to the DB. The gate runs AFTER _persist_tests_to_db (acknowledged
+            # ordering), so without this Test Explorer had nothing to filter on and
+            # the panel CTA dead-ended at an unfiltered list.
+            try:
+                from ...db.session import async_session_factory as _asf_r330
+                from sqlalchemy import text as _sqltext_r330
+                async with _asf_r330() as _s_r330:
+                    for _t in generated_tests:
+                        _tid2 = _t.get("id") or _t.get("test_id")
+                        _md = _t.get("metadata") or {}
+                        if not _tid2 or not _md.get("grounded_by"):
+                            continue
+                        _patch = {"grounded_by": _md["grounded_by"]}
+                        if _md.get("potentially_incorrect"):
+                            _patch["potentially_incorrect"] = True
+                        if _md.get("source_grounding"):
+                            _patch["source_grounding"] = _md["source_grounding"]
+                        await _s_r330.execute(_sqltext_r330(
+                            "UPDATE test_cases SET metadata = COALESCE(metadata,'{}'::jsonb) "
+                            "|| CAST(:patch AS jsonb), updated_at = NOW() "
+                            "WHERE test_id = :tid"),
+                            {"patch": json.dumps(_patch), "tid": _tid2})
+                    await _s_r330.commit()
+            except Exception as _db_exc:
+                log.warning("R330 P1d: grounded_by DB write-back failed: %s", _db_exc)
             # R211 B3.4 — bidirectional coverage gap: mapped endpoints no test exercises.
             _untested = untested_endpoints(_mapped, _exercised) if _mapped else []
             _trace_summary = {
@@ -5685,6 +5754,12 @@ async def generate_all_tests(
 
     # Find all requirements for the project (all projects stored in PROJECT_REQUIREMENTS)
     reqs = PROJECT_REQUIREMENTS.get(project_id, [])
+    if not reqs:
+        # R330 P5 follow-through — the in-memory store is empty after a restart
+        # when the sidecar was never written; the DB is the durable home.
+        from .requirements import hydrate_project_requirements_from_db
+        await hydrate_project_requirements_from_db(project_id)
+        reqs = PROJECT_REQUIREMENTS.get(project_id, [])
 
     if not reqs:
         raise HTTPException(status_code=404, detail=f"No requirements found for project {project_id}")

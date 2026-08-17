@@ -43,46 +43,10 @@ def _ep_id(method: str, path: str) -> str:
     return f"{(method or 'GET').upper()} {path or '/'}"
 
 
-def _classify_protocol(path: str, content_type: str | None = None, summary: str = "") -> str:
-    """Heuristic, zero-LLM protocol classification from a captured endpoint.
-
-    (The R156.C source-decorator classifier is more precise but needs source;
-    callers with backend routes can pass them to build_api_graph for that.)
-
-    C1 (2026-07-25, charter conformance) — the prior version misclassified a real
-    SSE endpoint `.../query-engine/event/response-stream` as REST (it keyed SSE only off
-    `text/event-stream`/`/sse`/`eventsource`), and could not see SOAP/XML (.NET) or .NET
-    SignalR at all → a genuine non-REST surface was silently reported empty. Added
-    `response-stream`/`streaming` SSE tokens + SOAP + SignalR branches, all with
-    word-ish boundary guards so tokens like `asset`/`assetsmodule`/`github` don't
-    false-match `sse`/`soap`/`hub`. SOAP requires a SOAP-SPECIFIC marker (not a bare
-    `xml` content-type, which REST APIs also use)."""
-    import re as _re
-    blob = f"{path or ''} {summary or ''}".lower()
-    ct = (content_type or "").lower()
-    # SOAP — SOAP-specific markers only (never a bare application/xml, which REST uses)
-    if ("soap+xml" in ct or "?wsdl" in blob or ".asmx" in blob
-            or "soapaction" in blob or "soap:envelope" in blob or "/soap" in blob):
-        return "soap"
-    # SSE — event-stream mime OR a streaming path token (bounded to avoid 'asset'→'sse')
-    if ("text/event-stream" in ct or "eventsource" in blob
-            or "response-stream" in blob or "event-stream" in blob
-            or _re.search(r"(^|[/_.-])sse([/_.-]|$)", blob)
-            or _re.search(r"(^|[/_.-])streaming([/_.-]|$)", blob)):
-        return "sse"
-    # .NET SignalR — negotiate handshake / hub route / explicit 'signalr' word
-    if ("/negotiate" in blob
-            or _re.search(r"(^|[/_.\s-])signalr([/_.\s-]|$)", blob)
-            or _re.search(r"(^|[/_.-])hubs?([/_.-]|$)", blob)):
-        return "signalr"
-    if "graphql" in blob:
-        return "graphql"
-    if path and (str(path).startswith("ws") or "/ws" in blob or "websocket" in blob
-                 or _re.search(r"(^|[/_.-])socket([/_.-]|$)", blob)):
-        return "websocket"
-    if "grpc" in blob or (".v1." in blob and "/grpc" in blob):
-        return "grpc"
-    return "rest"
+# R330 P3 — classify_protocol moved to protocol_discovery (single source of
+# truth; breaks the automation_engineer↔architecture_discovery import cycle).
+# Re-imported under the old private name so all existing callers keep working.
+from .protocol_discovery import classify_protocol as _classify_protocol  # noqa: E402
 
 
 def _shape_present(v: Any) -> bool:
@@ -583,6 +547,63 @@ async def run(*, project: dict, project_id: str, neo4j_driver: Any = None,
                                        "signal": "graphql_discovery_error",
                                        "detail": f"{type(exc).__name__}: {exc}"})
             log.warning("arch_discovery C3: protocol (graphql) discovery ERROR (%s) — "
+                        "recorded as a protocol_warning, not silently dropped", exc)
+
+    # R330 P3 — wire the previously-ORPHANED gRPC .proto + event-channel parsers
+    # (finished + unit-tested in protocol_discovery, zero production callers)
+    # using the source-fetch pattern the Module-Federation parser proved
+    # (github_context REST). Capped fetches; failures become truthful
+    # protocol_warnings, never silence. Same killswitch as GraphQL discovery.
+    if _os.environ.get("ARTA_ARCH_PROTOCOL_DISABLE", "").lower() not in ("1", "true", "yes"):
+        try:
+            from . import protocol_discovery as _proto_p3
+            from . import github_context as _ghc
+            import json as _json_p3
+
+            async def _p3_fetch_hits(query: str, cap: int) -> list[str]:
+                texts: list[str] = []
+                raw = await _ghc.search_code(project, query)
+                items = (_json_p3.loads(raw).get("items") or []) if raw else []
+                for it in items[:cap]:
+                    repo_name = (((it.get("repository") or {}).get("full_name") or "")
+                                 .split("/")[-1])
+                    txt = await _ghc.get_file(project, repo_name, it.get("path") or "")
+                    if txt:
+                        texts.append(txt)
+                return texts
+
+            _proto_agg = {"services": [], "messages": []}
+            for _txt in await _p3_fetch_hits("rpc extension:proto", 5):
+                _pp = _proto_p3.parse_proto(_txt)
+                _proto_agg["services"].extend(_pp.get("services") or [])
+                _proto_agg["messages"].extend(_pp.get("messages") or [])
+            _channels: list[dict] = []
+            for _q in ("KafkaListener", "RabbitTemplate", "nats.connect"):
+                for _txt in await _p3_fetch_hits(_q, 3):
+                    _channels.extend(_proto_p3.detect_event_channels(_txt) or [])
+            _uniq_ch, _seen_ch = [], set()
+            for _c in _channels:
+                _k = (_c.get("system"), _c.get("role"), _c.get("channel"))
+                if _k not in _seen_ch:
+                    _seen_ch.add(_k)
+                    _uniq_ch.append(_c)
+            if _proto_agg["services"] or _uniq_ch:
+                _pn2 = _proto_p3.build_protocol_nodes(
+                    proto=_proto_agg if _proto_agg["services"] else None,
+                    event_channels=_uniq_ch or None)
+                if _pn2["nodes"]:
+                    _api2 = graphs["api_graph"]
+                    _api2["nodes"].extend(_pn2["nodes"])
+                    _pc2 = _api2.setdefault("protocol_counts", {})
+                    for _k2, _v2 in _pn2["protocol_counts"].items():
+                        _pc2[_k2] = _pc2.get(_k2, 0) + _v2
+                    log.info("arch_discovery R330 P3: wired %d grpc/event node(s) "
+                             "from SUT source", len(_pn2["nodes"]))
+        except Exception as exc:
+            _protocol_warnings.append({"protocol": "grpc/event",
+                                       "signal": "source_protocol_discovery_error",
+                                       "detail": f"{type(exc).__name__}: {exc}"})
+            log.warning("arch_discovery R330 P3: proto/MQ source discovery ERROR (%s) — "
                         "recorded as a protocol_warning, not silently dropped", exc)
 
     inputs = {"captured_endpoints": len(captured), "chains": len(chains),
