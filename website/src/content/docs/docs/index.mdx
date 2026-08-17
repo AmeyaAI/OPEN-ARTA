@@ -1,0 +1,50 @@
+---
+title: Documentation
+description: Learn how to install ARTA, run your first grounded test generation, and understand the architecture behind truthful test reporting.
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+ARTA is an open-source platform that generates tests from your requirements and
+source code, executes them across six runtimes, and reports what your system
+actually does — with every failure attributed and every test traceable back to
+a requirement.
+
+If you are new, the shortest path is **Getting started → Your first test run**.
+It takes one `docker compose up -d` and a local Ollama model.
+
+<CardGrid>
+	<Card title="Getting started" icon="rocket">
+		Prerequisites and the five-command quickstart.
+		[Start here →](/OPEN-ARTA/docs/getting-started/)
+	</Card>
+	<Card title="Installation" icon="setting">
+		The full install: environment, services, first login, telemetry.
+		[Install ARTA →](/OPEN-ARTA/docs/installation/)
+	</Card>
+	<Card title="Your first test run" icon="approve-check">
+		Project → requirements → Generate → Run → report.
+		[Run tests →](/OPEN-ARTA/docs/quickstart/)
+	</Card>
+	<Card title="Core concepts" icon="open-book">
+		Grounded generation, risk scoring, failure classification, traceability.
+		[Understand ARTA →](/OPEN-ARTA/docs/concepts/)
+	</Card>
+	<Card title="Architecture" icon="puzzle">
+		The engine, the agents, the stores, and the six runtimes.
+		[See the design →](/OPEN-ARTA/docs/architecture/)
+	</Card>
+	<Card title="Contributing" icon="github">
+		Ground rules, dev loop, and good first contributions.
+		[Contribute →](/OPEN-ARTA/docs/contributing/)
+	</Card>
+</CardGrid>
+
+## Reference documents in the repository
+
+Some deep-dive documents live in the repository itself:
+
+- [ARTA_ARCHITECTURE.md](https://github.com/gangadharneeli/OPEN-ARTA/blob/main/ARTA_ARCHITECTURE.md) — full system design
+- [Self-hosting infrastructure spec](https://github.com/gangadharneeli/OPEN-ARTA/blob/main/docs/SELF_HOSTING_INFRASTRUCTURE.md) — sizing, profiles, security
+- [Runbook](https://github.com/gangadharneeli/OPEN-ARTA/blob/main/docs/RUNBOOK.md) — operations
+- [Telemetry](https://github.com/gangadharneeli/OPEN-ARTA/blob/main/docs/TELEMETRY.md) — the complete field list

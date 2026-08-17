@@ -1,0 +1,635 @@
+---
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const gh = 'https://github.com/gangadharneeli/OPEN-ARTA';
+---
+
+<StarlightPage
+	frontmatter={{
+		title: 'ARTA — AI test automation that understands your software',
+		description:
+			'Open-source AI test automation: grounded test generation from requirements and source code, six execution runtimes, requirement-to-result traceability, local LLM support.',
+		template: 'splash',
+		tableOfContents: false,
+	}}
+>
+	<div class="arta-home">
+		<!-- ══ Hero ══ -->
+		<section class="hero">
+			<div class="hero-copy">
+				<p class="arta-eyebrow">Open source · Apache-2.0</p>
+				<h1>Test automation that <em>understands</em> your software.</h1>
+				<p class="hero-sub">
+					ARTA reads your requirements, source code, API specs, and live application
+					behavior — then generates grounded tests, executes them across six runtimes,
+					and reports what your system actually does. AI writes the code now.
+					ARTA is the independent layer that verifies it.
+				</p>
+				<div class="hero-ctas">
+					<a class="arta-btn arta-btn-primary" href={`${base}/docs/getting-started/`}>Get started</a>
+					<a class="arta-btn arta-btn-ghost" href={gh}>View on GitHub</a>
+					<a class="arta-btn arta-btn-ghost" href="#workflow">See it in action</a>
+				</div>
+				<p class="gh-stats" id="gh-stats" hidden>
+					<a href={`${gh}/stargazers`}><span id="gh-stars"></span></a>
+					<span aria-hidden="true">·</span>
+					<a href={`${gh}/forks`}><span id="gh-forks"></span></a>
+					<span aria-hidden="true">·</span>
+					<a href={`${gh}/blob/main/LICENSE`}>Apache-2.0</a>
+				</p>
+			</div>
+
+			<!-- Hero visual: inputs → ARTA → grounded outputs -->
+			<div class="hero-viz" aria-label="ARTA pipeline: requirements, source code and API behavior flow into the ARTA engine, which produces grounded test cases, Playwright and API tests, execution results and traceability">
+				<div class="viz-col viz-inputs">
+					<div class="viz-node"><span class="viz-k">requirements</span>Jira · OpenAPI · docs</div>
+					<div class="viz-node"><span class="viz-k">source code</span>routes · DTOs · selectors</div>
+					<div class="viz-node"><span class="viz-k">live behavior</span>DOM catalog · captured endpoints</div>
+				</div>
+				<div class="viz-flow" aria-hidden="true"><i></i><i></i><i></i></div>
+				<div class="viz-engine">
+					<span class="viz-k viz-k-accent">arta engine</span>
+					<ol>
+						<li>risk scoring</li>
+						<li>ATDD design</li>
+						<li>grounded generation</li>
+						<li>validation</li>
+					</ol>
+				</div>
+				<div class="viz-flow" aria-hidden="true"><i></i><i></i><i></i></div>
+				<div class="viz-col viz-outputs">
+					<div class="viz-node">Playwright UI tests</div>
+					<div class="viz-node">API tests <span class="viz-dim">Newman</span></div>
+					<div class="viz-node">k6 · ZAP · Axe · Pytest</div>
+					<div class="viz-node">Traceability graph</div>
+					<div class="viz-node viz-verdicts">
+						<span class="arta-chip pass">PASS</span>
+						<span class="arta-chip fail">FAIL</span>
+						<span class="arta-chip blocked">BLOCKED</span>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- ══ Why ARTA ══ -->
+		<section class="arta-section">
+			<p class="arta-eyebrow">Why ARTA</p>
+			<h2>Testing that interacts with software is not the same as testing that understands it.</h2>
+			<p class="arta-lede">
+				Traditional automation encodes what a human knew about the system on the day
+				the test was written. ARTA regenerates that knowledge from the system itself —
+				and refuses to ship a test it cannot ground in evidence.
+			</p>
+			<div class="compare">
+				<div class="compare-col">
+					<h3 class="compare-h">Traditional automation</h3>
+					<ul>
+						<li>Every test is designed and coded by hand</li>
+						<li>Requirements and tests drift apart silently</li>
+						<li>Coverage is whatever got written, not what was needed</li>
+						<li>Selectors and endpoints rot as the app changes</li>
+						<li>QA and development run in separate workflows</li>
+						<li>A red build means “someone go investigate”</li>
+					</ul>
+				</div>
+				<div class="compare-col compare-arta">
+					<h3 class="compare-h">With ARTA</h3>
+					<ul>
+						<li>AI reads requirements and scores risk (probability × impact)</li>
+						<li>AI analyzes source code, API specs, and live app behavior</li>
+						<li>Tests are generated — and validated against what discovery actually found</li>
+						<li>Hallucinated selectors and endpoints are rejected before they ship</li>
+						<li>Every test stays traceable: requirement → scenario → script → result</li>
+						<li>Every failure is classified: <code>sut_regression</code> (your bug) vs
+							<code>test_gen_bug</code> (our bug) vs <code>grounding_blocked</code></li>
+					</ul>
+				</div>
+			</div>
+		</section>
+
+		<!-- ══ Capabilities ══ -->
+		<section class="arta-section">
+			<p class="arta-eyebrow">Capabilities</p>
+			<h2>The whole verification loop, not a test-case generator.</h2>
+			<div class="arta-grid caps">
+				<div>
+					<span class="arta-cell-tag">generate</span>
+					<h3>AI test generation</h3>
+					<p>Meaningful tests from requirements, source code, API specifications, and
+						discovered application behavior — risk-scored and ATDD-designed, not
+						prompt-and-pray.</p>
+				</div>
+				<div>
+					<span class="arta-cell-tag">ground</span>
+					<h3>Grounding validators</h3>
+					<p>Every generated test is checked against the discovered DOM catalog,
+						captured endpoints, and OpenAPI spec. What can't be grounded is retried
+						with hints, then honestly <span class="arta-chip blocked">BLOCKED</span> —
+						never silently shipped.</p>
+				</div>
+				<div>
+					<span class="arta-cell-tag">trace</span>
+					<h3>Requirement traceability</h3>
+					<p>Requirement → acceptance criterion → test → execution → defect, stored as
+						a graph you can query. Audit questions get answers, not archaeology.</p>
+				</div>
+				<div>
+					<span class="arta-cell-tag">ui</span>
+					<h3>Playwright</h3>
+					<p>Generates and executes Playwright UI tests with resilient selector
+						strategies, network-first waits, and self-healing on failure.</p>
+				</div>
+				<div>
+					<span class="arta-cell-tag">api</span>
+					<h3>API testing</h3>
+					<p>Newman collections generated from OpenAPI specs and captured live
+						endpoints — the fastest first win for most teams.</p>
+				</div>
+				<div>
+					<span class="arta-cell-tag">beyond</span>
+					<h3>Perf, security, a11y</h3>
+					<p>k6 performance, OWASP ZAP security, Axe accessibility, and Pytest
+						analytics runtimes round out six execution engines under one report.</p>
+				</div>
+				<div>
+					<span class="arta-cell-tag">agents</span>
+					<h3>AI agents</h3>
+					<p>Specialized agents for strategy, risk, ATDD design, automation
+						engineering, defect intelligence, and self-healing — each owning one
+						layer of the pipeline.</p>
+				</div>
+				<div>
+					<span class="arta-cell-tag">run</span>
+					<h3>CI/CD &amp; local AI</h3>
+					<p>Runs in GitHub Actions, GitLab CI, or Jenkins. Default LLM is Ollama on
+						your own hardware — no API keys, no cloud, air-gap friendly.</p>
+				</div>
+			</div>
+		</section>
+
+		<!-- ══ Workflow ══ -->
+		<section class="arta-section" id="workflow">
+			<p class="arta-eyebrow">From requirement to automated test</p>
+			<h2>Follow one requirement through the pipeline.</h2>
+			<div class="wf" id="wf">
+				<ol class="wf-steps">
+					<li class="wf-step" data-art="1"><button type="button"><span>01</span> Requirement imported<small>From Jira, an OpenAPI spec, or plain documents.</small></button></li>
+					<li class="wf-step" data-art="2"><button type="button"><span>02</span> Risk scored<small>Probability × impact, 1–9. High-risk paths get tested first.</small></button></li>
+					<li class="wf-step" data-art="3"><button type="button"><span>03</span> System discovered<small>DOM catalog, captured endpoints, source routes — evidence, not guesses.</small></button></li>
+					<li class="wf-step" data-art="4"><button type="button"><span>04</span> Scenarios designed<small>ATDD Gherkin acceptance criteria per requirement.</small></button></li>
+					<li class="wf-step" data-art="5"><button type="button"><span>05</span> Scripts generated<small>Playwright / API tests — validated against discovery, or BLOCKED.</small></button></li>
+					<li class="wf-step" data-art="6"><button type="button"><span>06</span> Executed<small>Across the six runtimes, with self-healing retries.</small></button></li>
+					<li class="wf-step" data-art="7"><button type="button"><span>07</span> Reported truthfully<small>Pass/fail attribution, traceability graph, quality gate.</small></button></li>
+				</ol>
+				<div class="wf-art arta-term" aria-live="polite">
+					<div class="arta-term-bar"><i></i><i></i><i></i>&nbsp;pipeline — illustrative artifacts</div>
+					<pre class="wf-pane" data-art="1"><code><span class="t-amber">REQ-101</span>  Password reset must expire links after 30 minutes
+<span class="t-dim">source: jira · status: imported</span></code></pre>
+					<pre class="wf-pane" data-art="2"><code><span class="t-amber">REQ-101</span>  risk = probability 3 × impact 3 = <span class="t-fail">9  (P0)</span>
+<span class="t-dim">auth flow · irreversible user impact</span></code></pre>
+					<pre class="wf-pane" data-art="3"><code>discovery: 42 routes · 118 endpoints captured · DOM catalog built
+<span class="t-pass">✓</span> POST /api/auth/reset-request   <span class="t-pass">✓</span> GET /reset?token=…</code></pre>
+					<pre class="wf-pane" data-art="4"><code><span class="t-cmd">Scenario:</span> expired reset link is rejected
+  <span class="t-dim">Given</span> a reset link issued 31 minutes ago
+  <span class="t-dim">When</span> the user opens the link
+  <span class="t-dim">Then</span> the app shows “link expired” and no session is created</code></pre>
+					<pre class="wf-pane" data-art="5"><code>req-101.spec.ts        <span class="t-pass">grounded ✓</span>  <span class="t-dim">selectors verified vs DOM catalog</span>
+req-101.collection     <span class="t-pass">grounded ✓</span>  <span class="t-dim">endpoints verified vs capture</span></code></pre>
+					<pre class="wf-pane" data-art="6"><code>playwright  <span class="t-pass">3 passed</span>  newman  <span class="t-pass">5 passed</span>  <span class="t-fail">1 failed</span>
+<span class="t-dim">retry with healing hint… still failing</span></code></pre>
+					<pre class="wf-pane" data-art="7"><code>FAIL  POST /api/auth/reset-request → 500
+classification: <span class="t-fail">sut_regression</span>   <span class="t-dim">← your bug, filed with evidence</span>
+trace: REQ-101 → AC-2 → req-101.collection → run 0142</code></pre>
+				</div>
+			</div>
+		</section>
+
+		<!-- ══ Terminal / real commands ══ -->
+		<section class="arta-section">
+			<p class="arta-eyebrow">Up and running</p>
+			<h2>One compose file. Your own LLM.</h2>
+			<p class="arta-lede">
+				These are the real commands — no cloud account, no API key. The default
+				provider is Ollama running on your machine.
+			</p>
+			<div class="term-pair">
+				<div class="arta-term">
+					<div class="arta-term-bar"><i></i><i></i><i></i>&nbsp;quickstart</div>
+					<pre><code><span class="t-cmt"># prerequisite: Ollama (ollama pull qwen2.5:32b) — or a cloud-LLM key</span>
+<span class="t-cmd">git clone https://github.com/gangadharneeli/OPEN-ARTA.git</span>
+<span class="t-cmd">cd OPEN-ARTA</span>
+<span class="t-cmd">cp .env.example .env</span>
+<span class="t-cmd">docker compose up -d</span>
+
+<span class="t-dim">UI  → http://localhost:38088</span>
+<span class="t-dim">API → http://localhost:38087</span></code></pre>
+				</div>
+				<div class="arta-term">
+					<div class="arta-term-bar"><i></i><i></i><i></i>&nbsp;a run report — illustrative</div>
+					<pre><code>run 0142 · 6 runtimes · 38 tests
+<span class="t-pass">✓ 31 passed</span>
+<span class="t-fail">✗ 4 failed</span>   <span class="t-dim">3 sut_regression · 1 test_gen_bug</span>
+<span class="t-amber">■ 3 blocked</span>  <span class="t-dim">grounding_blocked — not silently shipped</span>
+
+traceability: 38/38 linked to requirements
+quality gate: <span class="t-fail">FAIL</span> <span class="t-dim">(P0 regression on auth flow)</span>
+<span class="t-dim">a red report means something.</span></code></pre>
+				</div>
+			</div>
+		</section>
+
+		<!-- ══ Built for developers ══ -->
+		<section class="arta-section">
+			<p class="arta-eyebrow">Built for developers</p>
+			<h2>Your tests are yours.</h2>
+			<p class="arta-lede">
+				ARTA generates standard artifacts — Playwright specs, Postman collections, k6
+				scripts — that live in ordinary files and run anywhere. There is no
+				proprietary test format and no hosted lock-in: the whole single-team loop is
+				Apache-2.0, self-hosted, and works with a local LLM.
+			</p>
+			<div class="arta-grid dev-grid">
+				<div><h3>Open source</h3><p>Apache-2.0. The validator suite is the product — inspect it.</p></div>
+				<div><h3>Self-hosted</h3><p>One docker compose file. Postgres, Neo4j, Redis, Chroma included.</p></div>
+				<div><h3>Local LLM by default</h3><p>Ollama out of the box; Anthropic, OpenAI, Gemini optional per project.</p></div>
+				<div><h3>API-first</h3><p>A FastAPI backend drives everything the UI can do.</p></div>
+				<div><h3>CI/CD native</h3><p>Trigger generation and runs from GitHub Actions, GitLab CI, or Jenkins.</p></div>
+				<div><h3>Standard outputs</h3><p>Playwright · Postman · k6 · ZAP · Axe · Pytest. Take them with you.</p></div>
+				<div><h3>Non-mutating</h3><p>Discovery and testing never mutate your system by default — enforced at three independent layers.</p></div>
+				<div><h3>Honest telemetry</h3><p>Anonymous, bucketed, fully documented — and <code>ARTA_TELEMETRY=0</code> means zero network calls.</p></div>
+			</div>
+		</section>
+
+		<!-- ══ Architecture ══ -->
+		<section class="arta-section">
+			<p class="arta-eyebrow">Architecture</p>
+			<h2>Evidence in, verdicts out.</h2>
+			<p class="arta-lede">
+				A FastAPI engine orchestrates specialized agents over shared stores, dispatches
+				six execution runtimes, and reports through a quality gate. Every box below is
+				in the repo.
+			</p>
+			<div class="arch">
+				<div class="arch-row arch-inputs">
+					<div class="arch-box">Requirements<br /><span>Jira · OpenAPI · docs</span></div>
+					<div class="arch-box">Source code<br /><span>GitHub</span></div>
+					<div class="arch-box">Live behavior<br /><span>discovery probe</span></div>
+				</div>
+				<div class="arch-join" aria-hidden="true"></div>
+				<div class="arch-core">
+					<div class="arch-core-head">ARTA engine <span>FastAPI · Python</span></div>
+					<div class="arch-core-body">
+						<div class="arch-agents">strategy · risk · ATDD design · automation engineering · grounding validation · defect intelligence · self-healing</div>
+						<div class="arch-stores">
+							<span>Postgres</span><span>Neo4j <i>traceability</i></span><span>Redis</span><span>Chroma</span>
+						</div>
+					</div>
+				</div>
+				<div class="arch-join" aria-hidden="true"></div>
+				<div class="arch-row arch-runtimes">
+					<div class="arch-box">Playwright</div>
+					<div class="arch-box">Newman</div>
+					<div class="arch-box">k6</div>
+					<div class="arch-box">ZAP</div>
+					<div class="arch-box">Axe</div>
+					<div class="arch-box">Pytest</div>
+				</div>
+				<div class="arch-join" aria-hidden="true"></div>
+				<div class="arch-row arch-out">
+					<div class="arch-box">Truthful report<br /><span>pass/fail attribution</span></div>
+					<div class="arch-box">Traceability graph<br /><span>req → result</span></div>
+					<div class="arch-box">Quality gate<br /><span>CI/CD</span></div>
+				</div>
+			</div>
+			<p class="arch-more"><a href={`${base}/docs/architecture/`}>Read the architecture docs →</a></p>
+		</section>
+
+		<!-- ══ Open source ══ -->
+		<section class="arta-section">
+			<p class="arta-eyebrow">Open source · developer first</p>
+			<h2>Developed in the open. Free forever.</h2>
+			<p class="arta-lede">
+				The entire single-team loop — generation for all six runtimes, execution,
+				grounding validation, self-healing, truthful reports, single-project
+				traceability, local LLMs — is Apache-2.0 and will never be metered or
+				crippled. That boundary is written down and enforced in review.
+			</p>
+			<div class="arta-grid oss-grid">
+				<a href={gh}><h3>Repository</h3><p>Read the code. The validators are the pitch.</p></a>
+				<a href={`${gh}/blob/main/CONTRIBUTING.md`}><h3>Contributing</h3><p>Ground rules, dev setup, good first contributions.</p></a>
+				<a href={`${gh}/issues`}><h3>Issues</h3><p>Bugs and feature requests, in the open.</p></a>
+				<a href={`${gh}/discussions`}><h3>Discussions</h3><p>Questions, ideas, and show-and-tell.</p></a>
+				<a href={`${base}/roadmap/`}><h3>Roadmap</h3><p>Now, next, later — honestly labeled.</p></a>
+				<a href={`${gh}/blob/main/CHANGELOG.md`}><h3>Releases</h3><p>Versioned changelog; v0.1.0 is the first public cut.</p></a>
+			</div>
+			<div class="oss-cta">
+				<a class="arta-btn arta-btn-primary" href={gh}>★ Star ARTA on GitHub</a>
+				<a class="arta-btn arta-btn-ghost" href={`${base}/community/`}>Join the community</a>
+			</div>
+		</section>
+
+		<footer class="arta-foot">
+			<div class="arta-foot-rule"></div>
+			<div class="foot-inner">
+				<p>© 2026 DPOD Labs Private Limited · Apache-2.0 ·
+					<a href={`${gh}/blob/main/TRADEMARKS.md`}>Trademarks</a> ·
+					<a href={`${gh}/blob/main/SECURITY.md`}>Security policy</a> ·
+					<a href={`${base}/enterprise/`}>Enterprise</a></p>
+			</div>
+		</footer>
+	</div>
+</StarlightPage>
+
+<script>
+	// Live GitHub stats — real numbers or nothing. Cached for the session.
+	(async () => {
+		const el = document.getElementById('gh-stats');
+		if (!el) return;
+		try {
+			let d = JSON.parse(sessionStorage.getItem('arta-gh') || 'null');
+			if (!d) {
+				const r = await fetch('https://api.github.com/repos/gangadharneeli/OPEN-ARTA');
+				if (!r.ok) return;
+				d = await r.json();
+				sessionStorage.setItem('arta-gh', JSON.stringify({ s: d.stargazers_count, f: d.forks_count }));
+				d = { s: d.stargazers_count, f: d.forks_count };
+			}
+			document.getElementById('gh-stars').textContent = `${d.s} ${d.s === 1 ? 'star' : 'stars'}`;
+			document.getElementById('gh-forks').textContent = `${d.f} ${d.f === 1 ? 'fork' : 'forks'}`;
+			el.hidden = false;
+		} catch { /* offline or rate-limited: show nothing rather than a fake number */ }
+	})();
+
+	// Workflow stepper: auto-advances; click pins a step.
+	(() => {
+		const wf = document.getElementById('wf');
+		if (!wf) return;
+		const steps = [...wf.querySelectorAll('.wf-step')];
+		const panes = [...wf.querySelectorAll('.wf-pane')];
+		let i = 0;
+		let timer = null;
+		const show = (n) => {
+			i = n;
+			steps.forEach((s, k) => s.classList.toggle('on', k === n));
+			panes.forEach((p) => (p.style.display = p.dataset.art === String(n + 1) ? 'block' : 'none'));
+		};
+		const play = () => {
+			if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+			timer = setInterval(() => show((i + 1) % steps.length), 3200);
+		};
+		steps.forEach((s, k) =>
+			s.querySelector('button').addEventListener('click', () => {
+				clearInterval(timer);
+				show(k);
+			})
+		);
+		show(0);
+		play();
+	})();
+</script>
+
+<style>
+	.arta-home { margin-top: -1.5rem; }
+
+	/* ── Hero ── */
+	.hero {
+		max-width: 72rem;
+		margin: 0 auto;
+		padding: 4.5rem 1.25rem 0;
+		display: grid;
+		grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+		gap: 3rem;
+		align-items: center;
+	}
+	.hero h1 {
+		font-size: clamp(2.2rem, 5vw, 3.4rem);
+		line-height: 1.05;
+		margin: 0 0 1.25rem;
+		color: var(--sl-color-white);
+	}
+	.hero h1 em { font-style: normal; color: var(--sl-color-accent); }
+	.hero-sub {
+		font-size: 1.08rem;
+		line-height: 1.65;
+		color: var(--sl-color-gray-2);
+		margin: 0 0 2rem;
+		max-width: 34rem;
+	}
+	.hero-ctas { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+	.gh-stats[hidden] { display: none; }
+	.gh-stats {
+		margin-top: 1.5rem;
+		font-family: var(--sl-font-mono);
+		font-size: 0.8rem;
+		color: var(--sl-color-gray-3);
+		display: flex; gap: 0.75rem;
+	}
+	.gh-stats a { color: var(--sl-color-gray-2); text-decoration: none; }
+	.gh-stats a:hover { color: var(--sl-color-accent); }
+
+	/* Hero visual */
+	.hero-viz {
+		display: grid;
+		grid-template-columns: 1fr 1.6rem auto 1.6rem 1fr;
+		align-items: center;
+		gap: 0;
+		font-family: var(--sl-font-mono);
+		font-size: 0.74rem;
+	}
+	.viz-col { display: grid; gap: 0.5rem; }
+	.viz-node {
+		border: 1px solid var(--arta-line);
+		background: var(--arta-panel);
+		padding: 0.6rem 0.75rem;
+		color: var(--sl-color-gray-1);
+		line-height: 1.45;
+	}
+	.viz-k {
+		display: block;
+		font-size: 0.62rem;
+		letter-spacing: 0.14em;
+		text-transform: uppercase;
+		color: var(--sl-color-gray-3);
+		margin-bottom: 0.2rem;
+	}
+	.viz-k-accent { color: var(--sl-color-accent); }
+	.viz-dim { color: var(--sl-color-gray-3); }
+	.viz-engine {
+		border: 1px solid var(--sl-color-accent);
+		background: var(--arta-panel-2);
+		padding: 0.9rem 1rem;
+	}
+	.viz-engine ol { margin: 0.3rem 0 0; padding-left: 1.1rem; color: var(--sl-color-gray-1); }
+	.viz-engine li { margin: 0.15rem 0; }
+	.viz-verdicts { display: flex; gap: 0.4rem; align-items: center; }
+	.viz-flow { position: relative; height: 100%; min-height: 8rem; }
+	.viz-flow i {
+		position: absolute;
+		left: 0;
+		width: 100%;
+		height: 1px;
+		background: var(--arta-line-strong);
+	}
+	.viz-flow i:nth-child(1) { top: 25%; }
+	.viz-flow i:nth-child(2) { top: 50%; }
+	.viz-flow i:nth-child(3) { top: 75%; }
+	.viz-flow i::after {
+		content: '';
+		position: absolute;
+		top: -1.5px; left: 0;
+		width: 4px; height: 4px;
+		background: var(--sl-color-accent);
+		animation: flow 2.6s linear infinite;
+	}
+	.viz-flow i:nth-child(2)::after { animation-delay: 0.9s; }
+	.viz-flow i:nth-child(3)::after { animation-delay: 1.7s; }
+	@keyframes flow { from { left: 0; opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } to { left: calc(100% - 4px); opacity: 0; } }
+
+	/* ── Compare ── */
+	.compare {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 1px;
+		background: var(--arta-line);
+		border: 1px solid var(--arta-line);
+	}
+	.compare-col { background: var(--arta-panel); padding: 1.75rem; }
+	.compare-arta { background: var(--arta-panel-2); border-top: 2px solid var(--sl-color-accent); margin-top: -1px; }
+	.compare-h {
+		font-family: var(--sl-font-mono);
+		font-size: 0.75rem;
+		letter-spacing: 0.14em;
+		text-transform: uppercase;
+		color: var(--sl-color-gray-3);
+		margin: 0 0 1rem;
+	}
+	.compare-arta .compare-h { color: var(--sl-color-accent); }
+	.compare ul { margin: 0; padding: 0; list-style: none; }
+	.compare li {
+		padding: 0.55rem 0;
+		border-top: 1px solid var(--arta-line);
+		font-size: 0.92rem;
+		line-height: 1.5;
+		color: var(--sl-color-gray-2);
+	}
+	.compare-arta li { color: var(--sl-color-gray-1); }
+	.compare li:first-child { border-top: 0; }
+	.compare code { font-size: 0.8em; }
+
+	/* ── Grids ── */
+	.caps, .dev-grid { grid-template-columns: repeat(4, 1fr); }
+	.oss-grid { grid-template-columns: repeat(3, 1fr); }
+	.oss-grid a { text-decoration: none; transition: background 120ms ease; }
+	.oss-grid a:hover { background: var(--arta-panel-2); }
+	.oss-grid a:hover h3 { color: var(--sl-color-accent); }
+	.oss-cta { display: flex; gap: 0.75rem; margin-top: 2rem; flex-wrap: wrap; }
+
+	/* ── Workflow ── */
+	.wf {
+		display: grid;
+		grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+		gap: 2rem;
+		align-items: start;
+	}
+	.wf-steps { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--arta-line); }
+	.wf-step button {
+		all: unset;
+		box-sizing: border-box;
+		display: block;
+		width: 100%;
+		cursor: pointer;
+		padding: 0.8rem 0.9rem;
+		border-bottom: 1px solid var(--arta-line);
+		border-left: 2px solid transparent;
+		font-size: 0.98rem;
+		color: var(--sl-color-gray-2);
+		transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+	}
+	.wf-step button span {
+		font-family: var(--sl-font-mono);
+		font-size: 0.72rem;
+		color: var(--sl-color-gray-3);
+		margin-right: 0.6rem;
+	}
+	.wf-step button small {
+		display: none;
+		margin-top: 0.25rem;
+		font-size: 0.84rem;
+		line-height: 1.5;
+		color: var(--sl-color-gray-3);
+	}
+	.wf-step.on button {
+		border-left-color: var(--sl-color-accent);
+		background: var(--arta-panel);
+		color: var(--sl-color-white);
+	}
+	.wf-step.on button span { color: var(--sl-color-accent); }
+	.wf-step.on button small { display: block; }
+	.wf-step button:focus-visible { outline: 2px solid var(--sl-color-accent); outline-offset: -2px; }
+	.wf-art { min-height: 11rem; }
+	.wf-pane { display: none; }
+
+	/* ── Terminal pair ── */
+	.term-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+
+	/* ── Architecture ── */
+	.arch { font-family: var(--sl-font-mono); font-size: 0.78rem; }
+	.arch-row { display: grid; gap: 1px; background: var(--arta-line); border: 1px solid var(--arta-line); }
+	.arch-inputs, .arch-out { grid-template-columns: repeat(3, 1fr); }
+	.arch-runtimes { grid-template-columns: repeat(6, 1fr); }
+	.arch-box {
+		background: var(--arta-panel);
+		padding: 0.8rem 0.9rem;
+		text-align: center;
+		color: var(--sl-color-gray-1);
+		line-height: 1.5;
+	}
+	.arch-box span { color: var(--sl-color-gray-3); font-size: 0.68rem; }
+	.arch-join { width: 1px; height: 1.5rem; background: var(--arta-line-strong); margin: 0 auto; }
+	.arch-core { border: 1px solid var(--sl-color-accent); background: var(--arta-panel-2); }
+	.arch-core-head {
+		padding: 0.6rem 0.9rem;
+		border-bottom: 1px solid var(--arta-line);
+		color: var(--sl-color-accent);
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		font-size: 0.7rem;
+	}
+	.arch-core-head span { color: var(--sl-color-gray-3); text-transform: none; letter-spacing: 0; margin-left: 0.5rem; }
+	.arch-core-body { padding: 0.9rem; display: grid; gap: 0.75rem; }
+	.arch-agents { color: var(--sl-color-gray-1); line-height: 1.7; }
+	.arch-stores { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+	.arch-stores span {
+		border: 1px solid var(--arta-line-strong);
+		padding: 0.15rem 0.5rem;
+		color: var(--sl-color-gray-2);
+		font-size: 0.7rem;
+	}
+	.arch-stores i { font-style: normal; color: var(--sl-color-gray-3); }
+	.arch-more { margin-top: 1.25rem; font-size: 0.95rem; }
+
+	/* ── Footer ── */
+	.arta-foot .foot-inner {
+		max-width: 72rem;
+		margin: 0 auto;
+		padding: 1.5rem 1.25rem 3rem;
+		font-size: 0.85rem;
+		color: var(--sl-color-gray-3);
+	}
+	.arta-foot a { color: var(--sl-color-gray-2); }
+
+	/* ── Responsive ── */
+	@media (max-width: 64rem) {
+		.hero { grid-template-columns: 1fr; padding-top: 3rem; }
+		.caps, .dev-grid { grid-template-columns: repeat(2, 1fr); }
+		.term-pair, .wf { grid-template-columns: 1fr; }
+	}
+	@media (max-width: 40rem) {
+		.compare, .caps, .dev-grid, .oss-grid { grid-template-columns: 1fr; }
+		.hero-viz { grid-template-columns: 1fr; gap: 0.5rem; }
+		.viz-flow { display: none; }
+		.arch-runtimes { grid-template-columns: repeat(3, 1fr); }
+		.arch-inputs, .arch-out { grid-template-columns: 1fr; }
+	}
+</style>
