@@ -1,0 +1,24 @@
+# Dependabot version updates (security updates are enabled repo-side).
+# The pre-transfer security PRs were orphaned; this config regenerates
+# bumps against current main so they run the full check gate natively.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    ignore:
+      # Major frameworks need a human review, not an auto-bump
+      # (the critical Next.js middleware advisory is patched within 14.2.x).
+      - dependency-name: next
+        update-types: ["version-update:semver-major"]
+      - dependency-name: react
+        update-types: ["version-update:semver-major"]
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
