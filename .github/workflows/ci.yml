@@ -49,3 +49,32 @@ jobs:
       - run: bash scripts/smoke_login.sh
         env:
           ARTA_TELEMETRY: "0"
+
+  # Frontend depth beyond tsc: a production build catches page-compilation,
+  # CSS-pipeline (tailwind), and import errors type-check cannot see, and the
+  # render smoke catches boot-time crashes. This is the gate that makes
+  # UI-library upgrades provable (the tailwind-4/recharts-3 deferral reason).
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - name: Render smoke — the built app must boot and serve /
+        working-directory: frontend
+        run: |
+          npm run start & APP=$!
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/ -o /tmp/page.html; then break; fi
+            sleep 2
+          done
+          kill $APP || true
+          grep -qi "<html" /tmp/page.html || { echo "FAIL: / did not render"; exit 1; }
+          echo "PASS: / rendered"
