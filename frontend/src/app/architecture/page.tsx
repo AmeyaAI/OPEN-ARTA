@@ -107,6 +107,17 @@ function getReqId(req: Requirement): string {
   return req.req_id || req.id || ''
 }
 
+/* Requirement clarity band (stamped at import into metadata.quality). */
+const BAND_META: Record<string, { color: string; label: string }> = {
+  clear: { color: '#10b981', label: 'clear' },
+  weak: { color: '#f59e0b', label: 'weak' },
+  unclear: { color: '#fb7185', label: 'unclear' },
+}
+
+function getQuality(req: Requirement) {
+  return req.metadata?.quality
+}
+
 /* ── Page Component ───────────────────────────────────────────────────────── */
 
 export default function ArchitecturePage() {
@@ -118,6 +129,7 @@ export default function ArchitecturePage() {
   const [requirements, setRequirements] = useState<Requirement[]>([])
   const [selectedReqId, setSelectedReqId] = useState<string | null>(null)
   const [sourceFilter, setSourceFilter] = useState<string>('all')
+  const [bandFilter, setBandFilter] = useState<string>('all')
   const [reqTests, setReqTests] = useState<TestCase[]>([])
   const [changeLog, setChangeLog] = useState<RequirementChange[]>([])
   const [changeLogOpen, setChangeLogOpen] = useState(false)
@@ -524,6 +536,9 @@ export default function ArchitecturePage() {
     if (sourceFilter !== 'all') {
       list = list.filter(r => getSource(r) === sourceFilter)
     }
+    if (bandFilter !== 'all') {
+      list = list.filter(r => getQuality(r)?.band === bandFilter)
+    }
     // Sort: priority (P0 first), then coverage ascending
     const prioOrder: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 }
     return [...list].sort((a, b) => {
@@ -532,7 +547,7 @@ export default function ArchitecturePage() {
       if (pa !== pb) return pa - pb
       return getCoverage(a, reqTests) - getCoverage(b, reqTests)
     })
-  }, [requirements, sourceFilter])
+  }, [requirements, sourceFilter, bandFilter])
 
   /* ── Ingestion Summary Counts ───────────────────────────────────────────── */
 
@@ -1126,6 +1141,37 @@ export default function ArchitecturePage() {
           <option value="manual">Manual</option>
           <option value="confluence">Confluence</option>
         </select>
+
+        {/* Clarity Band Filter + summary strip (client-side, from loaded rows) */}
+        <select
+          value={bandFilter}
+          onChange={e => setBandFilter(e.target.value)}
+          className="px-3 py-2 rounded-lg text-sm outline-none"
+          style={{ background: '#0a0a14', border: '1px solid #1e1e3a', color: '#94a3b8' }}
+        >
+          <option value="all">All Clarity</option>
+          <option value="clear">Clear</option>
+          <option value="weak">Weak</option>
+          <option value="unclear">Unclear</option>
+        </select>
+        {(() => {
+          const scored = requirements.filter(r => getQuality(r))
+          if (!scored.length) return null
+          const by = (b: string) => scored.filter(r => getQuality(r)?.band === b).length
+          const avg = Math.round(scored.reduce((s, r) => s + (getQuality(r)?.score ?? 0), 0) / scored.length)
+          return (
+            <span className="text-[11px] px-2 py-1 rounded-lg"
+                  style={{ background: '#0a0a14', border: '1px solid #1e1e3a', color: '#64748b' }}
+                  title="Requirement clarity bands (heuristic, stamped at import)">
+              <span style={{ color: BAND_META.clear.color }}>{by('clear')} clear</span>
+              {' · '}
+              <span style={{ color: BAND_META.weak.color }}>{by('weak')} weak</span>
+              {' · '}
+              <span style={{ color: BAND_META.unclear.color }}>{by('unclear')} unclear</span>
+              {' · avg '}{avg}
+            </span>
+          )
+        })()}
       </div>
 
       {/* ── Upload Preview Modal ──────────────────────────────────────────── */}
@@ -1281,11 +1327,27 @@ export default function ArchitecturePage() {
                 {/* Row 1: ID + Priority */}
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="font-mono font-bold text-sm" style={{ color: '#06b6d4' }}>{id}</span>
-                  <span
-                    className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                    style={{ background: `${PRIORITY_COLORS[req.priority]}22`, color: PRIORITY_COLORS[req.priority] }}
-                  >
-                    {req.priority}
+                  <span className="flex items-center gap-1.5">
+                    {(() => {
+                      const q = getQuality(req)
+                      const bm = q && BAND_META[q.band]
+                      if (!q || !bm) return null
+                      return (
+                        <span
+                          className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                          title={`clarity ${q.score}/100${q.flags?.length ? ` — ${q.flags.slice(0, 3).join('; ')}` : ''}`}
+                          style={{ background: `${bm.color}18`, color: bm.color }}
+                        >
+                          {bm.label}
+                        </span>
+                      )
+                    })()}
+                    <span
+                      className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                      style={{ background: `${PRIORITY_COLORS[req.priority]}22`, color: PRIORITY_COLORS[req.priority] }}
+                    >
+                      {req.priority}
+                    </span>
                   </span>
                 </div>
 
@@ -1385,8 +1447,31 @@ export default function ArchitecturePage() {
                             </span>
                           )
                         })()}
+                        {/* Clarity band */}
+                        {(() => {
+                          const q = getQuality(selectedReq)
+                          const bm = q && BAND_META[q.band]
+                          if (!q || !bm) return null
+                          return (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                                  title={`clarity ${q.score}/100${q.flags?.length ? ` — ${q.flags.slice(0, 3).join('; ')}` : ''}`}
+                                  style={{ background: `${bm.color}18`, color: bm.color }}>
+                              clarity: {bm.label} {q.score}
+                            </span>
+                          )
+                        })()}
                       </div>
                       <div className="flex items-center gap-2">
+                        {/* R320 refinement entry, pre-scoped to this requirement —
+                            the remediation path for weak/unclear bands. */}
+                        {getQuality(selectedReq) && getQuality(selectedReq)!.band !== 'clear' && (
+                          <a href={`/ai-assistant?requirement_id=${encodeURIComponent(getReqId(selectedReq))}`}
+                             className="px-3 py-1.5 rounded-lg text-xs font-medium transition"
+                             title="Refine this requirement's acceptance criteria — corrections become durable grounding"
+                             style={{ background: 'transparent', border: '1px solid rgba(99,102,241,0.4)', color: '#a5b4fc' }}>
+                            {'✨'} Refine with AI
+                          </a>
+                        )}
                         <button onClick={handleFixExtraction}
                                 className="px-3 py-1.5 rounded-lg text-xs font-medium"
                                 style={{ background: '#1e1e3a', color: '#94a3b8', border: '1px solid #2a2a4a' }}>
@@ -1703,6 +1788,13 @@ export default function ArchitecturePage() {
                             {ac.id}
                           </span>
                           <span className="text-sm truncate" style={{ color: '#e2e8f0' }}>{ac.statement}</span>
+                          {getQuality(selectedReq)?.ac_flags?.includes(ac.id) && (
+                            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full flex-shrink-0"
+                                  title="No measurable/observable criterion in this AC — generated assertions stay read-side and never invent thresholds"
+                                  style={{ background: '#fb718518', color: '#fda4af' }}>
+                              not measurable
+                            </span>
+                          )}
                         </div>
                         <span
                           className="text-[10px] font-medium px-2 py-0.5 rounded-full flex-shrink-0 ml-2"

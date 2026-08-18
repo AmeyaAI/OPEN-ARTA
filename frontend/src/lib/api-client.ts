@@ -156,10 +156,24 @@ export interface Requirement {
   impact?: number
   probability?: number
   status?: string
-  acceptance_criteria?: { id: string; statement: string; covered: boolean }[]
+  acceptance_criteria?: {
+    id: string; statement: string; covered: boolean
+    given?: string | null; when?: string | null; then?: string | null
+  }[]
   ac_count?: number
   test_count?: number
   coverage_pct?: number
+  // Mirrors the backend's metadata.quality JSONB stamped at Jira import.
+  metadata?: {
+    quality?: {
+      score: number
+      band: 'clear' | 'weak' | 'unclear'
+      measurable_ac_pct?: number | null
+      ac_count?: number | null
+      flags?: string[]
+      ac_flags?: string[] // ids of ACs with no measurable criterion
+    }
+  }
 }
 
 export async function fetchRequirements(params?: { priority?: string; project_id?: string }) {

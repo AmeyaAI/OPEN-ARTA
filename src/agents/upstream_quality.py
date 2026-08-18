@@ -102,14 +102,38 @@ _SEVERITY_PENALTY = {"error": 40, "warning": 8}
 
 
 def _ac_statements(acceptance_criteria) -> list[str]:
-    """Normalise ACs (list of str or dict) to a list of statement strings."""
+    """Normalise ACs (list of str or dict) to a list of statement strings.
+
+    Dict ACs include given/when/then, NOT just the statement/title: the
+    measurable content lives in `then` ("returns HTTP 200 with a non-empty
+    access_token"), and scoring only the short title false-flagged 42% of the
+    corpus of a real SUT as non-measurable (ABC-394 scored 0 with textbook ACs)."""
     out: list[str] = []
     for ac in acceptance_criteria or []:
         if isinstance(ac, str):
             out.append(ac)
         elif isinstance(ac, dict):
-            out.append(ac.get("statement") or ac.get("description") or ac.get("text") or "")
+            parts = [ac.get("statement") or ac.get("description") or ac.get("text") or "",
+                     ac.get("given") or "", ac.get("when") or "",
+                     ac.get("then") or ac.get("then_") or ""]
+            out.append(" ".join(p for p in parts if p).strip())
     return [s for s in out if s and s.strip()]
+
+
+def ac_measurability_flags(acceptance_criteria) -> list[str]:
+    """IDs of ACs with no measurable/observable criterion anywhere in their
+    statement+given/when/then — the per-AC verdict behind RQ-002, exposed for
+    UI badges (`metadata.quality.ac_flags`). Same regex as the scorer: one
+    source of truth."""
+    flagged: list[str] = []
+    for ac in acceptance_criteria or []:
+        if not isinstance(ac, dict):
+            continue
+        text = " ".join(str(ac.get(k) or "") for k in
+                        ("statement", "description", "text", "given", "when", "then", "then_"))
+        if text.strip() and not _MEASURABLE_RE.search(text):
+            flagged.append(str(ac.get("id") or ac.get("ac_id") or ""))
+    return [f for f in flagged if f]
 
 
 def _result(violations: list[Violation], *, metrics: dict | None = None) -> TestQualityResult:
@@ -508,7 +532,11 @@ def enrich_requirement_acs_with_source(requirement: dict, project_id: str) -> di
             if isinstance(ac, dict) else "")
         if not stmt or not stmt.strip():
             continue
-        if _MEASURABLE_RE.search(stmt):
+        # Measurability judged on the WHOLE AC (statement+given/when/then via
+        # _ac_statements) — the inline title-only check false-flagged ACs whose
+        # measurable content lives in `then` and enriched them needlessly
+        whole = (_ac_statements([ac]) or [stmt])[0]
+        if _MEASURABLE_RE.search(whole):
             continue   # already measurable — leave it
         hit = _best_endpoint(stmt)
         if hit:

@@ -56,7 +56,12 @@ RULE: If a criterion cannot be made measurable, REWRITE it (derive an observable
 proxy from the given/when), or SPLIT it so at least one sub-criterion is testable.
 Avoid the vague words: fast, slow, good, properly, gracefully, seamless, robust,
 user-friendly, appropriate, correct, as expected — replace each with a number,
-status, value, or field assertion. Never leave `measurable_threshold` empty.
+status, value, or field assertion.
+FALLBACK (honesty over invention): when the SOURCE TEXT genuinely states no
+observable outcome and none can be derived from the given/when, do NOT invent a
+number or status the source never stated. Keep the criterion, append the literal
+suffix "[UNMEASURED — needs refinement]" to its `then`, and set
+`measurable_threshold` to "UNMEASURED". Otherwise never leave it empty.
 
 OUTPUT JSON (array of requirements):
 [
@@ -128,9 +133,13 @@ PASS/FAIL with no human judgement. The `then` contains at least ONE of:
   • an exact value/enum/message ("status == 'active'", "error == 'unauthorized'")
   • a concrete field presence/shape ("body contains a non-empty `organizations` array")
   • an observable state delta ("the record count increases by 1")
-Populate `measurable_threshold` with that concrete criterion — never empty.
+Populate `measurable_threshold` with that concrete criterion.
 Avoid: fast, slow, good, properly, gracefully, seamless, robust, user-friendly,
 appropriate, correct, as expected — replace each with a number/status/value/field.
+FALLBACK (honesty over invention): when the source genuinely states no observable
+outcome and none derives from the given/when, do NOT invent one — append the
+literal suffix "[UNMEASURED — needs refinement]" to that `then` and set
+`measurable_threshold` to "UNMEASURED". Otherwise never leave it empty.
 
 OUTPUT JSON (array with EXACTLY ONE requirement):
 [
