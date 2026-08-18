@@ -16,7 +16,7 @@ python-multipart>=0.0.20
 asyncpg>=0.30.0          # PostgreSQL async driver
 neo4j>=5.27.0            # Neo4j graph database
 redis>=5.2.0             # Redis pub/sub + streams
-chromadb>=0.6.0          # Vector store for RAG
+chromadb>=1.5.9          # Vector store for RAG
 
 # Resilience
 # F9-12: cap upper bound — tenacity 10 changes the @retry signature.
