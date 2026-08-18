@@ -108,7 +108,7 @@ export default function RunHistoryPage() {
   const [loading,  setLoading]  = useState(true)
   const [error,    setError]    = useState<string | null>(null)
   const [watchingRunId, setWatchingRunId] = useState<string | null>(null)
-  const pollRef = useRef<ReturnType<typeof setInterval>>()
+  const pollRef = useRef<ReturnType<typeof setInterval>>(undefined)
   const initialSelectDone = useRef(false)
 
   // Build auth headers fresh each time (avoids stale closure)
