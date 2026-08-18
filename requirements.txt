@@ -69,4 +69,4 @@ beautifulsoup4>=4.12
 # R262 — analytics pytest pillar: frozen_dataset returns real DataFrames (tests
 # index data["col"]); pyarrow lets the fixture generator emit canonical .parquet.
 pandas>=2.0
-pyarrow>=15.0
+pyarrow>=25.0.1
