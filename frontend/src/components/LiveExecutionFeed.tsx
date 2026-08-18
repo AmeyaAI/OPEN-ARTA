@@ -36,8 +36,8 @@ export default function LiveExecutionFeed({
   const [elapsed, setElapsed] = useState(0)
   const [currentStage, setCurrentStage] = useState(1) // Start from Requirements
   const scrollRef = useRef<HTMLDivElement>(null)
-  const timerRef = useRef<ReturnType<typeof setInterval>>()
-  const stageTimerRef = useRef<ReturnType<typeof setInterval>>()
+  const timerRef = useRef<ReturnType<typeof setInterval>>(undefined)
+  const stageTimerRef = useRef<ReturnType<typeof setInterval>>(undefined)
 
   // Animate pre-execution stages (1-4) in the first seconds
   useEffect(() => {
