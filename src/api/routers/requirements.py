@@ -56,12 +56,16 @@ async def hydrate_project_requirements_from_db(project_id: str) -> int:
                 return 0
             from ...db.repository import RequirementRepo, _to_dict
             repo = RequirementRepo(db)
-            rows, _total = await repo.list(project_id=project_id)
+            rows, _total = await repo.list(project_id=project_id, limit=1000)
             reqs = []
             for r in rows:
                 d = _to_dict(r)
+                # given/when/then included — post-restart gen-time clarity
+                # scoring reads these hydrated dicts; title-only hydration
+                # silently re-broke measurability scoring after every restart.
                 d["acceptance_criteria"] = [
-                    {"id": ac.ac_id, "statement": ac.title, "covered": ac.is_covered}
+                    {"id": ac.ac_id, "statement": ac.title, "covered": ac.is_covered,
+                     "given": ac.given, "when": ac.when_, "then": ac.then_}
                     for ac in (r.acceptance_criteria or [])
                 ]
                 d["ac_count"] = len(d["acceptance_criteria"])
@@ -879,12 +883,18 @@ async def list_requirements(
         if db:
             from ...db.repository import RequirementRepo, _to_dict
             repo = RequirementRepo(db)
-            rows, total = await repo.list(project_id=project_id, priority=priority)
+            # limit=1000: the repo default (100) silently truncated the DB read
+            # the stale in-memory merge instead of the DB of record.
+            rows, total = await repo.list(project_id=project_id, priority=priority, limit=1000)
             reqs = []
             for r in rows:
                 d = _to_dict(r)
+                # given/when/then included: the measurable content lives in
+                # `then` — dropping it regressed clarity scoring + UI AC detail
+                # to title-only.
                 d["acceptance_criteria"] = [
-                    {"id": ac.ac_id, "statement": ac.title, "covered": ac.is_covered}
+                    {"id": ac.ac_id, "statement": ac.title, "covered": ac.is_covered,
+                     "given": ac.given, "when": ac.when_, "then": ac.then_}
                     for ac in (r.acceptance_criteria or [])
                 ]
                 d["ac_count"] = len(d["acceptance_criteria"])
@@ -1959,6 +1969,25 @@ async def import_from_jira(body: JiraImportRequest, request: Request):
                 }
             except Exception as _r257_exc:
                 log.warning("R257: JIRA source persist failed for %s: %s", key, _r257_exc)
+        # Jira-sync: score requirement clarity AT IMPORT (was gen-time-only, so
+        # freshly imported requirements sat unscored/unflagged until their first
+        # generation). Heuristic-only — no LLM. Stamped into metadata.quality so
+        # the DB row carries the verdict immediately.
+        try:
+            from ...agents.upstream_quality import (
+                ac_measurability_flags, requirement_clarity_score)
+            _cs = requirement_clarity_score(req)
+            req.setdefault("metadata", {})["quality"] = {
+                "score": _cs.get("score"), "band": _cs.get("band"),
+                "measurable_ac_pct": _cs.get("measurable_ac_pct"),
+                "ac_count": _cs.get("ac_count"),
+                "flags": [h.get("kind") or h.get("rule") for h in (_cs.get("highlights") or [])][:10],
+                # Per-AC verdicts: ids of ACs with no measurable criterion —
+                # drives the UI's per-AC "not measurable" badge with no 2nd call.
+                "ac_flags": ac_measurability_flags(acs),
+            }
+        except Exception as _cs_exc:
+            log.debug("import/jira: clarity scoring skipped for %s: %s", key, _cs_exc)
         imported.append(req)
         await _persist_one(req)   # incremental — survives disconnect/timeout
         per_issue.append({"key": key, "status": "imported", "ac_count": len(acs),

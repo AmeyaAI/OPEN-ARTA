@@ -720,6 +720,8 @@ async def list_tests(
                     t["requirement_id"] = meta["requirement_id"]
                 if meta.get("ac_id"):
                     t["ac_id"] = meta["ac_id"]
+                if meta.get("ac_measurability") and not t.get("ac_measurability"):
+                    t["ac_measurability"] = meta["ac_measurability"]
                 # Tool comes from automation_tool column; surface under both
                 # keys for the UI which checks `tool` first
                 if not t.get("tool") and t.get("automation_tool"):
@@ -818,7 +820,39 @@ async def upstream_quality_summary(project_id: str = Query(None)):
     isn't captured by the test-id route.
     """
     from ...agents.upstream_quality import read_upstream_quality
-    return read_upstream_quality(project_id=project_id)
+    out = read_upstream_quality(project_id=project_id)
+    # TEA Layer-9 gate signal: DB-side requirement-quality band distribution
+    # (stamped at Jira import into metadata.quality) — covers requirements
+    # that have never generated (sidecars are gen-time-only). INFO visibility.
+    try:
+        from ..db_adapter import try_db
+        from sqlalchemy import text as _text
+        async with try_db() as db:
+            if db is not None:
+                # Filter built in Python — a ":pid IS NULL OR CAST(:pid AS uuid)"
+                # param is untypeable for asyncpg and failed silently here.
+                _where = "metadata->'quality' IS NOT NULL"
+                _params: dict = {}
+                if project_id:
+                    _where += " AND project_id = CAST(:pid AS uuid)"
+                    _params["pid"] = project_id
+                rows = (await db.execute(_text(f"""
+                    SELECT metadata->'quality'->>'band' AS band,
+                           COUNT(*) AS n,
+                           AVG((metadata->'quality'->>'score')::numeric) AS avg_score
+                    FROM requirements
+                    WHERE {_where}
+                    GROUP BY 1"""), _params)).all()
+                if rows:
+                    total_n = sum(r.n for r in rows)
+                    out["requirement_bands"] = {
+                        **{r.band: r.n for r in rows if r.band},
+                        "avg_score": round(sum(float(r.avg_score or 0) * r.n
+                                               for r in rows) / total_n, 1),
+                    }
+    except Exception as _exc:
+        log.debug("upstream-quality: requirement_bands aggregate skipped: %s", _exc)
+    return out
 
 
 @router.get("/{test_id}", dependencies=[Depends(_require_api_key)])
@@ -896,6 +930,27 @@ def _extract_scenario_title(gherkin: str) -> str:
         if line.startswith('Scenario:') or line.startswith('Scenario Outline:'):
             return line.split(':', 1)[1].strip()
     return "Generated Test"
+
+
+def _ac_measurability_of(ac, ac_id: str, requirement: dict | None = None) -> str:
+    """"measurable" | "unmeasured" | "unknown" for one AC dict — the per-test
+    provenance stamp. The import-time verdict (metadata.quality.ac_flags) wins:
+    R205 enrichment appends measurable clauses to AC text before gen, so the
+    heuristic alone would report enriched — not source — measurability.
+    Killswitch ARTA_AC_MEASURABILITY_WEIGHT_DISABLE=1."""
+    if os.environ.get("ARTA_AC_MEASURABILITY_WEIGHT_DISABLE") == "1":
+        return "unknown"
+    try:
+        stamped = (((requirement or {}).get("metadata") or {}).get("quality") or {}).get("ac_flags")
+        if stamped is not None:
+            return "unmeasured" if ac_id in stamped else "measurable"
+        from ...agents.upstream_quality import ac_measurability_flags
+        if not isinstance(ac, dict):
+            return "unknown"
+        return "unmeasured" if ac_measurability_flags(
+            [{**ac, "id": ac_id or ac.get("id") or "ac"}]) else "measurable"
+    except Exception:
+        return "unknown"
 
 
 def _extract_ac_scenario(
@@ -4728,6 +4783,10 @@ async def generate_tests(body: GenerateRequest, request: Request):
                 # downstream filters added across R71-R77.
                 "project_id": requirement.get("project_id") or "",
                 "ac_id": ac_id,
+                # Assertion provenance: a test minted from an AC with no
+                # measurable criterion must never be read as source-grounded on
+                # its thresholds. Killswitch ARTA_AC_MEASURABILITY_WEIGHT_DISABLE=1.
+                "ac_measurability": _ac_measurability_of(ac, ac_id, requirement),
                 "test_type": test_type,
                 "gherkin": ac_gherkin,
                 "gherkin_scenario": ac_gherkin,
@@ -4899,6 +4958,13 @@ async def generate_tests(body: GenerateRequest, request: Request):
                         title = EXCLUDED.title, gherkin_scenario = EXCLUDED.gherkin_scenario,
                         script_content = EXCLUDED.script_content,
                         script_path = EXCLUDED.script_path,
+                        -- metadata was missing from this SET list: every force-regen
+                        -- kept the FIRST generation's metadata (stale _req_hash,
+                        -- evidence_targets, ac_measurability never landing). Replace
+                        -- wholesale — gate-written keys (grounded_by, source_grounding)
+                        -- are re-stamped post-gate each generation and old verdicts
+                        -- describe the old script.
+                        metadata = EXCLUDED.metadata,
                         requirement_id = COALESCE(EXCLUDED.requirement_id, test_cases.requirement_id),
                         ac_id = COALESCE(EXCLUDED.ac_id, test_cases.ac_id),
                         trace_id = EXCLUDED.trace_id,
@@ -4929,6 +4995,8 @@ async def generate_tests(body: GenerateRequest, request: Request):
                     "metadata": json.dumps({
                         "requirement_id": te["requirement_id"],
                         "ac_id": te.get("ac_id"),
+                        # Assertion provenance — source-AC measurability verdict.
+                        "ac_measurability": te.get("ac_measurability"),
                         "_req_hash": te.get("_req_hash"),
                         "analytics_layer": te.get("analytics_layer"),
                         "adversarial_category": te.get("adversarial_category"),

@@ -648,8 +648,35 @@ class ATDDDesignerAgent:
         def _r284_label(i: int, ac: dict) -> str:
             return str(ac.get("id") or ac.get("ac_id") or f"AC-{i+1}")
 
+        # Gen-time measurability weighting (never filtering): non-measurable
+        # ACs are ANNOTATED in place — reordering measurable-first would corrupt
+        # R284's positional labels for id-less ACs. Source order is traceability.
+        # Killswitch ARTA_AC_MEASURABILITY_WEIGHT_DISABLE=1.
+        _unmeasured_labels: list[str] = []
+        if os.environ.get("ARTA_AC_MEASURABILITY_WEIGHT_DISABLE") != "1":
+            try:
+                from .upstream_quality import ac_measurability_flags
+                # Import-time verdict FIRST (metadata.quality.ac_flags): R205
+                # enrichment appends measurable clauses before we run, so the
+                # heuristic alone would see enriched text and mark nothing —
+                # the source-level truth is the stamped pre-enrichment verdict.
+                _stamped = set(((req.get("metadata") or {}).get("quality") or {})
+                               .get("ac_flags") or [])
+                _unmeasured_labels = [
+                    _r284_label(_i, _a) for _i, _a in enumerate(acs)
+                    if isinstance(_a, dict)
+                    and (_r284_label(_i, _a) in _stamped
+                         or ac_measurability_flags([{**_a, "id": _r284_label(_i, _a)}]))
+                ]
+            except Exception:
+                _unmeasured_labels = []
+
+        def _meas_tag(i: int, ac: dict) -> str:
+            return " [UNMEASURED]" if _r284_label(i, ac) in _unmeasured_labels else ""
+
         all_ac_statements = "\n".join(
-            f"  {_r284_label(i, ac)}: {ac.get('statement', '')}" for i, ac in enumerate(acs)
+            f"  {_r284_label(i, ac)}: {ac.get('statement', '')}{_meas_tag(i, ac)}"
+            for i, ac in enumerate(acs)
         ) or "  AC-1: Core functionality works correctly"
 
         # R254 (WS2b) — the AC's STRUCTURED given/when/then.
@@ -894,6 +921,18 @@ class ATDDDesignerAgent:
                 "LLM is designing WITHOUT SUT context; a low R213 grounded_pct "
                 "for this requirement reflects THAT, not the scenarios",
                 req.get("id"), _aug_exc,
+            )
+
+        # Measurability constraint for the [UNMEASURED]-tagged ACs above:
+        # cover them, but never pad them with invented thresholds.
+        if _unmeasured_labels:
+            prompt += (
+                "\n\n# AC MEASURABILITY (weighting — not filtering)\n"
+                f"ACs marked [UNMEASURED] ({', '.join(_unmeasured_labels[:12])}) state no "
+                "measurable criterion in the source. Still cover each with a scenario, but "
+                "assert ONLY what the AC states: never invent numeric thresholds, status "
+                "codes, or exact values the source does not state — use presence/visibility/"
+                "read-side observable checks instead.\n"
             )
 
         # R213.D — scale max_tokens by AC count. The flat 8192 budget truncates
