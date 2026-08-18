@@ -38,6 +38,53 @@ def _load_requirements():
     if not os.path.exists('.arta/requirements.json'):
         _save_requirements()
 
+async def hydrate_project_requirements_from_db(project_id: str) -> int:
+    """R330 P5 follow-through — PROJECT_REQUIREMENTS loads only from the
+    `.arta/requirements.json` sidecar at import, but DB-backed import flows may
+    never write that sidecar (live evidence: sidecar was `{}` while the DB held
+    33 rows for the SUT) → after ANY restart, generate-all 404'd "No requirements
+    found" while /api/requirements (DB-backed) worked. Hydrate the in-memory
+    store from the DB (same mapping list_requirements uses) and persist the
+    sidecar, so EVERY PROJECT_REQUIREMENTS consumer heals — not just one call
+    site. Returns requirements available for the project after hydration."""
+    if PROJECT_REQUIREMENTS.get(project_id):
+        return len(PROJECT_REQUIREMENTS[project_id])
+    try:
+        from ..db_adapter import try_db
+        async with try_db() as db:
+            if db is None:
+                return 0
+            from ...db.repository import RequirementRepo, _to_dict
+            repo = RequirementRepo(db)
+            rows, _total = await repo.list(project_id=project_id)
+            reqs = []
+            for r in rows:
+                d = _to_dict(r)
+                d["acceptance_criteria"] = [
+                    {"id": ac.ac_id, "statement": ac.title, "covered": ac.is_covered}
+                    for ac in (r.acceptance_criteria or [])
+                ]
+                d["ac_count"] = len(d["acceptance_criteria"])
+                # The in-memory shape keys `id` on the TEXTUAL req id (the import
+                # flows set req_id = id) — _to_dict gives the DB UUID pk, which
+                # leaked into artifact stems/test ids on the first hydrated regen
+                # (UUID-named specs the exec req-scoping filter can never match).
+                # Keep the pk under db_id; present the textual id.
+                if d.get("req_id"):
+                    d["db_id"] = d.get("id")
+                    d["id"] = d["req_id"]
+                reqs.append(d)
+            if reqs:
+                PROJECT_REQUIREMENTS[project_id] = reqs
+                _save_requirements()
+                log.info("PROJECT_REQUIREMENTS hydrated from DB for %s: %d requirement(s)",
+                         project_id, len(reqs))
+            return len(reqs)
+    except Exception as exc:
+        log.warning("PROJECT_REQUIREMENTS DB hydration failed for %s: %s", project_id, exc)
+        return 0
+
+
 def _save_requirements():
     try:
         from ...telemetry import bucket as _tel_bucket, emit as _tel_emit

@@ -444,25 +444,65 @@ async def grounding_coverage(project_id: str) -> dict:
             "grounded_by": rt.get("grounded_by", {}),
             "potentially_incorrect_count": rt.get("potentially_incorrect_count", 0),
             "traceability_pct": rt.get("traceability_pct"),
+            # R330 P1d — gen-time fail-loud statuses ("unavailable:no_github_token"
+            # …) + the distinct needs-attention count (guess ∪ flagged; summing the
+            # two double-counted, since a guess test is usually also flagged).
+            "source_grounding": rt.get("source_grounding", {}),
+            "needs_attention_count": rt.get("needs_attention_count",
+                                            rt.get("potentially_incorrect_count", 0)),
         }
     except Exception as exc:
         log.debug("grounding_coverage tests block skipped: %s", exc)
-    # Is SOURCE grounding possible for this SUT? (a github integration present)
+    # R330 P1d — is SOURCE grounding possible for this SUT? The integrations
+    # schema is FLAT (IntegrationsInput: github_repo/github_token/repositories) —
+    # the old nested integrations["github"] read matched nothing, so the banner
+    # was structurally always "unavailable". Align with what gen actually
+    # enforces (_fetch_sut_source_context): the token is the hard gate.
     project = _PROJECTS_REF.get(project_id) or {}
     integrations = project.get("integrations") or {}
-    gh = integrations.get("github") if isinstance(integrations, dict) else None
-    source_available = bool(gh and (gh.get("repo") or gh.get("repos") or gh.get("enabled")))
+    if hasattr(integrations, "model_dump"):
+        integrations = integrations.model_dump()
+    if not isinstance(integrations, dict):
+        integrations = {}
+    # be stale/EMPTY after a restart while gen reads the durable project record
+    # — the panel said token_available=false while gen truthfully stamped
+    # "available". Fall back to the DB integrations so the instrument agrees
+    # with what gen actually does.
+    if not (integrations.get("github_token") or integrations.get("github_repo")
+            or integrations.get("repositories")):
+        try:
+            from ..db_adapter import try_db
+            import sqlalchemy as _sa
+            from ...db import models as _models
+            async with try_db() as _db:
+                if _db is not None:
+                    _row = (await _db.execute(
+                        _sa.select(_models.Project.integrations)
+                        .where(_models.Project.id == project_id))).scalar()
+                    if isinstance(_row, dict) and _row:
+                        integrations = _row
+        except Exception as _exc:
+            log.debug("grounding_coverage: DB integrations fallback skipped: %s", _exc)
+    repo_configured = bool(integrations.get("github_repo") or integrations.get("repositories"))
+    token_available = bool(integrations.get("github_token") or os.environ.get("GITHUB_TOKEN"))
+    source_available = token_available
+    if source_available and not repo_configured:
+        note = ("Source grounding token present but no repository configured — "
+                "add the SUT repo(s) to the GitHub integration for targeted fetches.")
+    elif source_available:
+        note = ("Source grounding available — endpoints not source_grounded can be "
+                "improved by re-discovery.")
+    else:
+        note = ("No source (GitHub) grounding configured/reachable for this SUT — human "
+                "correction (Refine with AI) is the authoritative grounding source.")
     return {
         "project_id": project_id,
         **cov,
         "tests": tests_block,
         "source_grounding_available": source_available,
-        "note": (
-            "Source grounding available — endpoints not source_grounded can be "
-            "improved by re-discovery." if source_available else
-            "No source (GitHub) grounding configured/reachable for this SUT — human "
-            "correction (Refine with AI) is the authoritative grounding source."
-        ),
+        "source_grounding": {"token_available": token_available,
+                             "repo_configured": repo_configured},
+        "note": note,
     }
 
 

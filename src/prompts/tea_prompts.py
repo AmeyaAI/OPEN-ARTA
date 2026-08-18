@@ -988,6 +988,20 @@ SLA threshold: {sla_threshold}
 [F3-6] PARSED ENDPOINT THRESHOLDS (extracted deterministically from acceptance criteria — USE EXACTLY):
 {endpoint_thresholds_block}
 
+[R330 P5b — AC-GROUPED CHECKS, HARD CONSTRAINT]
+Wrap every check() in a group() named with the acceptance-criterion id it
+verifies, copied EXACTLY from the Gherkin (never renumber, never invent):
+
+```js
+import {{ group }} from 'k6';
+group('AC-1: <short AC summary>', () => {{
+  check(response, {{ 'status is 200': (r) => r.status === 200 }});
+}});
+```
+
+One group per AC exercised. ARTA parses per-group check results to report
+each AC's pass/fail individually — ungrouped checks lose that traceability.
+
 [R85.0 — REQUIRED IMPORTS, HARD CONSTRAINT — READ THIS FIRST]
 
 Every k6 script you generate MUST begin with these EXACT import statements,

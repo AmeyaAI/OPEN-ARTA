@@ -1,9 +1,11 @@
 """Phase J5 — auto-apply Neo4j Phase C schema fragment on app startup.
 
-The canonical `src/graph/schema.cypher` is permission-locked (uid 7474,
-mode 700) so it can't be merged into a single file by the dev process
-that runs migrations. The Phase C constraints + indexes live in
-`src/graph/schema_phase_c.cypher` instead.
+`src/graph/schema.cypher` is RETIRED as a schema of record (R330 P5): it is
+permission-locked (uid 7474, mode 700), never loaded by any startup path,
+keys on `.id` while the live writer (graph/writer.py) MERGEs on
+req_id/ac_id/test_id/endpoint_key, and constrains a `:TestRun` label nothing
+creates. The APPLIED schemas are this loader's two files below — including
+the R311 spine constraints on the writer's real key space.
 
 This module reads that file and runs each `CREATE CONSTRAINT IF NOT
 EXISTS` / `CREATE INDEX IF NOT EXISTS` statement via the async Neo4j
@@ -86,7 +88,15 @@ async def _apply_schema(neo4j_driver: Any, schema_path: Path, label: str) -> dic
                 except Exception as exc:
                     msg = f"{stmt[:80]}…: {exc}"
                     out["errors"].append(msg)
-                    log.warning("%s schema stmt failed: %s", label, msg)
+                    if "r311_" in stmt.lower():
+                        # R330 P5 — a spine constraint failing = pre-existing
+                        # duplicate nodes; the dedup migration must run first.
+                        log.warning(
+                            "%s schema stmt failed (%s) — the graph holds duplicate "
+                            "spine nodes; run src/graph/r311_island_unify_migration.cypher "
+                            "(Stages A/B) via cypher-shell, then restart", label, msg)
+                    else:
+                        log.warning("%s schema stmt failed: %s", label, msg)
     except Exception as exc:
         out["errors"].append(f"session error: {exc}")
         log.warning("%s schema apply: session error: %s", label, exc)

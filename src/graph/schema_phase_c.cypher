@@ -53,3 +53,18 @@ CREATE INDEX chain_semantic IF NOT EXISTS
 // RETURN v.name, provider.endpoint_key, p.jsonpath,
 //        collect(consumer.endpoint_key) AS consumers
 // ORDER BY v.name;
+
+// ── R330 P5 — traceability-spine key-space constraints (from the R311 Stage C
+// migration; applied at startup so the writer.py MERGE duplicate-node race
+// cannot recur in a default deployment). If one of these FAILS at startup the
+// database already holds duplicate spine nodes — run the dedup stages of
+// src/graph/r311_island_unify_migration.cypher (manual, APOC) first.
+
+CREATE CONSTRAINT r311_tc_test_id IF NOT EXISTS
+  FOR (t:TestCase) REQUIRE t.test_id IS UNIQUE;
+
+CREATE CONSTRAINT r311_req_req_id IF NOT EXISTS
+  FOR (r:Requirement) REQUIRE r.req_id IS UNIQUE;
+
+CREATE CONSTRAINT r311_ac_ac_id IF NOT EXISTS
+  FOR (a:AcceptanceCriteria) REQUIRE a.ac_id IS UNIQUE;

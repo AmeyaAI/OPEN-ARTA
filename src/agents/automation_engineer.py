@@ -3241,6 +3241,17 @@ class AutomationEngineerAgent:
                 token=token,
                 gherkin_text=gherkin_text,
             ) or []
+            # R330 P3 — classify protocol per route. The per-protocol call-
+            # convention map (_PROTO_CALL) branched on r["protocol"] since
+            # birth, but routes only ever carried {method, path} — every
+            # non-REST branch was dead code. Single choke-point: both
+            # extraction paths (tree walk + /search/code) flow through here.
+            # Killswitch ARTA_R330_PROTOCOL_DISABLE=1.
+            if os.environ.get("ARTA_R330_PROTOCOL_DISABLE") != "1":
+                from .protocol_discovery import classify_protocol as _r330_cp
+                for _rt in be_routes:
+                    if isinstance(_rt, dict) and not _rt.get("protocol"):
+                        _rt["protocol"] = _r330_cp(_rt.get("path") or "")
         except Exception as exc:
             log.debug("R104.B: extract_backend_routes_rest failed: %s", exc)
         # R156.B.2 — classify per-endpoint token requirements by walking
@@ -3734,29 +3745,41 @@ class AutomationEngineerAgent:
                         _load_captured_endpoints as _r330_load,
                         param_constraint_block as _r330_pcb,
                         enrich_endpoints_with_openapi_params as _r330_enrich,
+                        select_param_relevant_endpoints as _r330_select,
                     )
                     _r330_caps = _r330_load(_r330_pid) or []
-                    _r330_gwords = {
-                        _w.lower() for _w in re.findall(r"[A-Za-z_]{4,}", combined_gherkin or "")
-                    }
-                    # Only endpoints whose PATH is Gherkin-relevant — no `or all`
-                    # fallback (arbitrary constraints are bloat, and bloat regressed
-                    # the suite before). Empty relevant set → no block.
-                    _r330_rel = [
-                        _e for _e in _r330_caps
-                        if isinstance(_e, dict) and any(
-                            _w in (_e.get("path") or "").lower() for _w in _r330_gwords)
-                    ]
-                    # Mine the SUT's OpenAPI contract for param enum/min/max/pattern
-                    # (fetched via R206 but never extracted) before formatting.
-                    _r330_rel = _r330_enrich(_r330_pid, _r330_rel)
+                    # P2b — enrich FIRST (fills + persists params_detail), then
+                    # relevance-filter with the truthful fallback + counters
+                    # (constraint-carrying endpoints only when Gherkin matches none).
+                    _r330_all = _r330_enrich(_r330_pid, list(_r330_caps))
+                    _r330_rel, _r330_stats = _r330_select(_r330_all, combined_gherkin)
                     _r330_blk = _r330_pcb(_r330_rel)
                     if _r330_blk:
                         prompt += "\n\n" + _r330_blk + "\n"
-                        log.info("R330 P2: injected param-constraint block (batch) for %s", req_id)
+                    log.info(
+                        "R330 P2b: param block %s (batch) for %s (known=%d relevant=%d fallback=%s)",
+                        "injected" if _r330_blk else "EMPTY", req_id,
+                        _r330_stats.get("known", 0), _r330_stats.get("relevant", 0),
+                        _r330_stats.get("fallback", "-"))
             except Exception as _r330_bexc:
                 log.debug("R330 P2: param-constraint inject (batch) skipped for %s: %s",
                           req_id, _r330_bexc)
+            # R330 P2b (G1) — batch path also gets request BODIES (R295/R297) and
+            # REAL entity ids (R251), PW-parity. Killswitch shared with the
+            # Newman wire (ARTA_R330_P2B_NEWMAN_DISABLE).
+            if os.environ.get("ARTA_R330_P2B_NEWMAN_DISABLE") != "1":
+                try:
+                    _bk_pid_p2b = risk.get("project_id") or "" if isinstance(risk, dict) else ""
+                    if _bk_pid_p2b:
+                        _bk_b295 = self._r295_request_body_block(_bk_pid_p2b, combined_gherkin)
+                        if _bk_b295:
+                            prompt += "\n" + _bk_b295 + "\n"
+                        _bk_b251 = self._r251_real_data_block(_bk_pid_p2b, combined_gherkin)
+                        if _bk_b251:
+                            prompt += "\n" + _bk_b251 + "\n"
+                except Exception as _bk_p2b_exc:
+                    log.debug("R330 P2b: batch body/real-id blocks skipped for %s: %s",
+                              req_id, _bk_p2b_exc)
 
         # G3/R219 — the batch prompt does NOT import PLAYWRIGHT_GENERATION, so
         # its PW section lacks the key gen constraints. Append them here scoped
@@ -3869,6 +3892,22 @@ class AutomationEngineerAgent:
                         len(_bk6_block.splitlines()), req_id)
             except Exception as _bk6_exc:
                 log.debug("R217: batch k6 grounding skipped for %s: %s", req_id, _bk6_exc)
+        # R330 P5b — AC-grouped k6 checks, batch parity. The constraint lives
+        # in K6_GENERATION for the sequential path, but the batch path composes
+        # its own prompt (the R219.K lesson: a gen fix in one path silently
+        # skips the others — live-verified: batch k6 emitted 0 AC groups while
+        # the template path guarantees them). Own gate — independent of the
+        # R217 endpoint-grounding killswitch.
+        if any(t == "k6" for t, _ in tools_needed):
+            prompt += (
+                "\n[R330 P5b HARD CONSTRAINT — the k6 SECTION MUST WRAP CHECKS "
+                "IN AC-NAMED GROUPS]\n"
+                "Import { group } from 'k6' and wrap every check() in a "
+                "group('AC-<id>: <short summary>', () => { ... }) named with the "
+                "acceptance-criterion id copied EXACTLY from the Gherkin (never "
+                "renumber, never invent). One group per AC exercised — ARTA "
+                "reports each AC's pass/fail from these group names.\n"
+            )
 
         # R243 (BATCH path) — inject the SOURCE-DISCOVERED SUT LOGIN FLOWS so the
         # batch PW/Newman sections use the SUT's real login request. R219.K lesson:
@@ -3884,6 +3923,11 @@ class AutomationEngineerAgent:
                     _bk_r243_project, req_id, project_id or "")
                 if _bk_r243_block:
                     prompt += _bk_r243_block
+                # R330 P2b (G5) — per-family auth map (names only, never values).
+                _bk_auth_blk = self._r330_auth_family_block(
+                    _bk_r243_project, project_id or "")
+                if _bk_auth_blk:
+                    prompt += _bk_auth_blk
             except Exception as _bk_r243_exc:
                 log.debug("R243: batch login-contract injection skipped for %s: %s",
                           req_id, _bk_r243_exc)
@@ -6931,21 +6975,22 @@ test.describe('{req_id} — ARTA-generated', () => {{
                         from .api_discovery import (
                             param_constraint_block as _r330_pcb,
                             enrich_endpoints_with_openapi_params as _r330_enrich,
+                            select_param_relevant_endpoints as _r330_select,
                         )
-                        _r330_gwords = {
-                            _w.lower() for _w in re.findall(r"[A-Za-z_]{4,}", gherkin_text or "")
-                        }
-                        # Gherkin-relevant paths only — no `or all` fallback (bloat).
-                        _r330_rel = [
-                            _e for _e in _captured
-                            if isinstance(_e, dict) and any(
-                                _w in (_e.get("path") or "").lower() for _w in _r330_gwords)
-                        ]
-                        _r330_rel = _r330_enrich(_pid_for_endpoints, _r330_rel)
+                        # P2b — enrich FIRST (fills + persists params_detail from
+                        # the contract), then relevance-filter with the truthful
+                        # fallback + counters (the silent-empty filter hid "known
+                        # but filtered out" as "nothing known").
+                        _r330_all = _r330_enrich(_pid_for_endpoints, list(_captured))
+                        _r330_rel, _r330_stats = _r330_select(_r330_all, gherkin_text)
                         _r330_block = _r330_pcb(_r330_rel)
                         if _r330_block:
                             prompt += "\n\n" + _r330_block + "\n"
-                            log.info("R330 P2: injected param-constraint block for %s", req_id)
+                        log.info(
+                            "R330 P2b: param block %s for %s (known=%d relevant=%d fallback=%s)",
+                            "injected" if _r330_block else "EMPTY", req_id,
+                            _r330_stats.get("known", 0), _r330_stats.get("relevant", 0),
+                            _r330_stats.get("fallback", "-"))
                     except Exception as _r330_exc:
                         log.debug("R330 P2: param-constraint inject skipped: %s", _r330_exc)
         except Exception as _r98_3_exc:
@@ -7043,6 +7088,13 @@ test.describe('{req_id} — ARTA-generated', () => {{
             (risk.get("project_id") if isinstance(risk, dict) else "") or "")
         if _r243_block:
             prompt += _r243_block
+        # R330 P2b (G5) — per-family auth map (R243's sibling): which path family
+        # uses which scheme/claims/host. Names only — never values.
+        _r330_auth_blk = self._r330_auth_family_block(
+            _r104_b_project,
+            (risk.get("project_id") if isinstance(risk, dict) else "") or "")
+        if _r330_auth_blk:
+            prompt += _r330_auth_blk
 
         # Phase AD/2 — augment the test SCRIPT with the SUT architecture
         # (Phase 1 discovery graphs): real endpoints + protocols, the auth
@@ -10454,6 +10506,74 @@ Output: Complete .cy.ts file.
     })
 
     @staticmethod
+    def _r330_auth_family_block(project: dict | None, project_id: str = "") -> str:
+        """R330 P2b (G5) — render the DISCOVERED per-family auth map (env_block
+        `auth.chain` + `auth.host_map`) as a prompt block: which path-prefix
+        family talks to which host with which auth SCHEME and which token
+        CLAIM/VARIABLE names. Discovery derives this source-first with HAR
+        fallback, but until P2b only login_flows crossed into a prompt — gen
+        emitted ONE bearer for every family and leaned on the dispatch rewrite
+        (R159/R213.K) to fix it per-request.
+
+        SECURITY (fail-closed): renders rule `match`/`scheme`/`host` and the
+        {placeholder} NAMES extracted from value_template — NEVER the template
+        itself (HAR generalization could retain a literal token fragment) and
+        never any credential value. Killswitch ARTA_R330_AUTH_FAMILY_DISABLE=1."""
+        try:
+            import os as _os_r330a
+            import re as _re_r330a
+            if _os_r330a.environ.get("ARTA_R330_AUTH_FAMILY_DISABLE") == "1":
+                return ""
+            proj = project
+            if not isinstance(proj, dict) or not (proj.get("environments") or {}):
+                if project_id:
+                    try:
+                        from ..api.routers.projects import _PROJECTS as _PR330
+                        proj = _PR330.get(project_id) or {}
+                    except Exception:
+                        proj = {}
+            chain, host_map = [], {}
+            for _en, _eb in ((proj or {}).get("environments") or {}).items():
+                if hasattr(_eb, "model_dump"):
+                    _eb = _eb.model_dump()
+                if not isinstance(_eb, dict):
+                    continue
+                _auth = _eb.get("auth") or {}
+                if _auth.get("chain") or _auth.get("host_map"):
+                    chain = _auth.get("chain") or []
+                    host_map = _auth.get("host_map") or {}
+                    break
+            if not chain:
+                return ""
+            lines: list[str] = []
+            for rule in chain[:12]:
+                if not isinstance(rule, dict):
+                    continue
+                match = rule.get("match") or "*"
+                scheme = rule.get("scheme") or "bearer"
+                claims = _re_r330a.findall(r"\{(\w+)\}", str(rule.get("value_template") or ""))
+                host = host_map.get(rule.get("host") or "", "") or ""
+                seg = f"paths '{match}*' → {scheme}"
+                if claims:
+                    seg += " built from {" + ", ".join(dict.fromkeys(claims)) + "}"
+                if host:
+                    seg += f" @ {host}"
+                lines.append(seg)
+            if not lines:
+                return ""
+            return (
+                "\n[HARD CONSTRAINT — PER-FAMILY AUTH MAP (discovered from the SUT)]\n"
+                "Different API path families use DIFFERENT auth. Do NOT reuse one\n"
+                "bearer everywhere — target each request's family below. Token VALUES\n"
+                "are injected by the runner; reference only the standard auth variable\n"
+                "for the family (never hardcode a token):\n"
+                + "\n".join("  - " + ln for ln in lines) + "\n"
+                "[END PER-FAMILY AUTH MAP]\n"
+            )
+        except Exception:
+            return ""
+
+    @staticmethod
     def _r243_login_contract_block(
         project: dict | None, req_id: str = "", project_id: str = "",
     ) -> str:
@@ -10837,6 +10957,80 @@ Output: Complete .cy.ts file.
         ])
         return "\n".join(_lines)
 
+    def _r330_chain_newman_early_return(
+        self, gherkin_text: str, risk: dict, req_id: str,
+    ) -> "AutomationScript | None":
+        """R330 P2b (G6) — R212's analogue for Newman: when a DISCOVERED chain
+        covers the requirement's R211-mapped endpoint surface above threshold,
+        emit the deterministic chain_aware_newman collection (dependency gating,
+        provider extraction, cascade-skip built in) and skip the LLM entirely.
+        All-or-nothing like R212 — below threshold the LLM path runs unchanged
+        (no partial-chain hybrid). The builders were previously wired ONLY to
+        discovery_executor; this closes the requirement-driven gap.
+        Killswitch ARTA_R330_CHAIN_NEWMAN_DISABLE=1."""
+        try:
+            import os as _os_g6
+            if _os_g6.environ.get("ARTA_R330_CHAIN_NEWMAN_DISABLE") == "1":
+                return None
+            pid = (risk or {}).get("project_id") if isinstance(risk, dict) else None
+            if not pid:
+                return None
+            from .api_discovery import load_chains
+            from .traceability_gate import path_matches_template
+            from . import chain_aware_newman as _can
+            chains = load_chains(str(pid)) or []
+            if not chains:
+                return None
+            mapped: list[str] = []
+            for _e in ((risk or {}).get("endpoints") or []):
+                _p = (_e.get("path") if isinstance(_e, dict) else str(_e)) or ""
+                if _p:
+                    mapped.append(_p)
+            if len(mapped) < 2:
+                return None      # too little mapped surface to judge coverage
+            best, best_cov = None, 0.0
+            for ch in chains:
+                if not isinstance(ch, dict):
+                    continue
+                templates = [
+                    str(n.get("path_template") or "")
+                    for n in (ch.get("nodes") or []) if isinstance(n, dict)
+                ]
+                templates = [t for t in templates if t]
+                if not templates:
+                    continue
+                covered = sum(
+                    1 for mp in mapped
+                    if any(path_matches_template(mp, t) for t in templates))
+                cov = covered / len(mapped)
+                if cov > best_cov:
+                    best, best_cov = ch, cov
+            if best is None or best_cov < 0.6:
+                return None
+            base_url = ((risk or {}).get("api_base_url")
+                        or (risk or {}).get("base_url") or None)
+            happy, _adv = _can.build_chain_aware_newman(
+                best, requirement_id=req_id, base_url=base_url,
+                emit_adversarial=True, project_id=str(pid))
+            items = len((happy or {}).get("item", []) or [])
+            if not items:
+                return None      # R217.B semantics — an all-dead chain is absent
+            import json as _json_g6
+            log.info(
+                "R330 P2b (G6): %s → DETERMINISTIC chain Newman collection "
+                "(%d items, %.0f%% mapped-endpoint coverage), skipped LLM gen",
+                req_id, items, best_cov * 100)
+            return AutomationScript(
+                test_id=req_id, tool="newman", language="json",
+                filename=f"src/automation/newman/{sanitize_req_id(req_id)}_api.json",
+                content=_json_g6.dumps(happy, indent=2), scenario_count=items,
+                metadata={"r330_deterministic_chain": True,
+                          "chain_coverage": round(best_cov, 2)})
+        except Exception as _g6_exc:
+            log.debug("R330 P2b (G6): chain-Newman early-return skipped for %s: %s",
+                      req_id, _g6_exc)
+            return None
+
     async def _generate_newman(
         self,
         gherkin_text: str,
@@ -10870,6 +11064,12 @@ Output: Complete .cy.ts file.
           we can't even get the skeleton.
         """
         req_id = self._extract_req_id(gherkin_text, risk)
+        # R330 P2b (G6) — deterministic chained-collection EARLY RETURN (R212's
+        # Newman analogue): when a discovered chain covers this requirement's
+        # mapped endpoint surface, emit via chain_aware_newman and skip the LLM.
+        _g6_script = self._r330_chain_newman_early_return(gherkin_text, risk, req_id)
+        if _g6_script is not None:
+            return _g6_script
         auth_method = risk.get("_auth_method", "none")
         auth_cookie_name = risk.get("_auth_cookie_name", "")
         # Pull the OpenAPI-derived endpoint list (if present) so Pass 1 can
@@ -11859,6 +12059,11 @@ Output: Complete .cy.ts file.
             req_id,
             (risk.get("project_id") if isinstance(risk, dict) else "") or "",
         )
+        # R330 P2b (G5) — per-family auth map for Newman (names only, never values).
+        _r243_newman_block += self._r330_auth_family_block(
+            (risk or {}).get("_project_dict") if isinstance(risk, dict) else None,
+            (risk.get("project_id") if isinstance(risk, dict) else "") or "",
+        )
 
         # R118.F — Newman parity for R118.B's Gherkin-keyword negative
         # endpoint constraint. Same helper, same data source; the LLM
@@ -11890,6 +12095,80 @@ Output: Complete .cy.ts file.
                 req_id, _r118_f_exc,
             )
         _r118_f_prompt_block = ("\n" + _r118_f_block + "\n") if _r118_f_block else ""
+
+        # R330 P2b (G1) — Newman parity with the PW context stack. Request BODIES
+        # (R295: OpenAPI/captured/probe/R297-DTO), REAL entity ids (R251) and
+        # param constraints (P2a/P2b) were injected ONLY into Playwright gen —
+        # yet Newman is the runtime that actually SENDS bodies and params, so it
+        # guessed (`{ data: {} }` 500s, invented ids, out-of-enum params).
+        # Same shared helpers; provider-aware budget (R119.A bloat lesson);
+        # empty when nothing is known. Killswitch ARTA_R330_P2B_NEWMAN_DISABLE=1.
+        _r330_newman_blocks = ""
+        if os.environ.get("ARTA_R330_P2B_NEWMAN_DISABLE") != "1":
+            _p2b_pid = (risk or {}).get("project_id") if isinstance(risk, dict) else None
+            if _p2b_pid:
+                try:
+                    _b295 = self._r295_request_body_block(_p2b_pid, gherkin_text)
+                    if _b295:
+                        _r330_newman_blocks += "\n" + _b295 + "\n"
+                except Exception as _e295:
+                    log.debug("R330 P2b: Newman R295 block skipped: %s", _e295)
+                try:
+                    _b251 = self._r251_real_data_block(_p2b_pid, gherkin_text)
+                    if _b251:
+                        _r330_newman_blocks += "\n" + _b251 + "\n"
+                except Exception as _e251:
+                    log.debug("R330 P2b: Newman R251 block skipped: %s", _e251)
+                try:
+                    from .api_discovery import (
+                        _load_captured_endpoints as _p2b_load,
+                        enrich_endpoints_with_openapi_params as _p2b_enrich,
+                        select_param_relevant_endpoints as _p2b_select,
+                        param_constraint_block as _p2b_pcb,
+                    )
+                    _p2b_all = _p2b_enrich(_p2b_pid, list(_p2b_load(_p2b_pid) or []))
+                    _p2b_rel, _p2b_stats = _p2b_select(_p2b_all, gherkin_text)
+                    _p2b_me, _p2b_mc = (
+                        (10, 500)
+                        if self._r126_a_should_include("r98_3_captured_endpoints") == "compress"
+                        else (20, 900))
+                    _b_pcb = _p2b_pcb(_p2b_rel, max_endpoints=_p2b_me, max_chars=_p2b_mc)
+                    if _b_pcb:
+                        _r330_newman_blocks += "\n" + _b_pcb + "\n"
+                    log.info(
+                        "R330 P2b: Newman param block %s for %s (known=%d relevant=%d fallback=%s)",
+                        "injected" if _b_pcb else "EMPTY", req_id,
+                        _p2b_stats.get("known", 0), _p2b_stats.get("relevant", 0),
+                        _p2b_stats.get("fallback", "-"))
+                except Exception as _e_pcb:
+                    log.debug("R330 P2b: Newman param block skipped: %s", _e_pcb)
+                # R330 P3 — GraphQL operations block: architecture discovery
+                # introspects graphql endpoints into api_graph.json; when ops
+                # exist, gen must use them (a graphql op is a POST {query} body,
+                # and an invented op name can never succeed).
+                try:
+                    if os.environ.get("ARTA_R330_PROTOCOL_DISABLE") != "1":
+                        from pathlib import Path as _P_gql
+                        _ag = (_P_gql(".arta/architecture_discovery")
+                               / str(_p2b_pid) / "api_graph.json")
+                        if _ag.is_file():
+                            _agj = json.loads(_ag.read_text())
+                            _gql_ops = [
+                                n for n in (_agj.get("nodes") or [])
+                                if isinstance(n, dict) and n.get("kind") == "graphql_operation"]
+                            if _gql_ops:
+                                _r330_newman_blocks += (
+                                    "\n[GRAPHQL OPERATIONS (introspected from the SUT)]\n"
+                                    "GraphQL endpoints take POST bodies of the form "
+                                    "{\"query\": \"...\"}. Use ONLY these introspected "
+                                    "operations — never invent one:\n"
+                                    + "\n".join(
+                                        f"  - {n.get('operation')}: {n.get('name')}"
+                                        for n in _gql_ops[:30]) + "\n")
+                                log.info("R330 P3: injected %d graphql op(s) into Newman "
+                                         "prompt for %s", min(len(_gql_ops), 30), req_id)
+                except Exception as _gql_exc:
+                    log.debug("R330 P3: graphql ops block skipped: %s", _gql_exc)
 
         prompt = f"""\
 You are a Postman/Newman API testing expert. Generate a Postman
@@ -11935,7 +12214,7 @@ Include at minimum per user-input endpoint:
 - Oversized body variant (> 1MB expected 413)
 
 {_auth_hint}
-{_r105_d_prompt_block}{_r118_f_prompt_block}{_r243_newman_block}
+{_r105_d_prompt_block}{_r118_f_prompt_block}{_r243_newman_block}{_r330_newman_blocks}
 Output JSON:
 {{
   "info": {{"name": "ARTA — {req_id}", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"}},
@@ -14949,6 +15228,14 @@ Output ONLY the JSON. No prose. One entry per item in this batch.
                 "guarantee STRUCTURAL correctness; this constraint guarantees\n"
                 "AUTHENTICATION correctness against the live SUT.\n"
             )
+        # R330 P2b (G5) — per-family auth map for k6 (names only, never values):
+        # per-family k6 auth exists at dispatch (R213.K), but gen should already
+        # know which path family carries which scheme so scripts target it.
+        _k6_auth_blk = self._r330_auth_family_block(
+            (risk or {}).get("_project_dict") if isinstance(risk, dict) else None,
+            _k6_project_id or "")
+        if _k6_auth_blk:
+            prompt += _k6_auth_blk
 
         # R113.F — R104.B parity for k6. Pre-R113.F: k6 LLM only saw R98.3
         # captured_endpoints, could hallucinate paths in load tests → wasted

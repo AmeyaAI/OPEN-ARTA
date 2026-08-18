@@ -208,14 +208,18 @@ export default function TestExplorerPage() {
   // Push to GitHub per-test state
   const [pushingTestId, setPushingTestId] = useState<string | null>(null)
 
+  // R330 P1d — the SUT-Understanding panel CTA deep-links ?flag=needs_attention
+  // so the list shows exactly the tests the gate flagged (guess ∪ untraceable).
+  const flagParam = searchParams.get('flag') || undefined
+
   useEffect(() => {
     setLoading(true)
-    const params = { ...filter, project_id: currentProjectId || undefined }
+    const params = { ...filter, project_id: currentProjectId || undefined, flag: flagParam }
     fetchTests(params)
       .then(d => { setTests(d.tests); setTotal(d.total) })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [filter, currentProjectId])
+  }, [filter, currentProjectId, flagParam])
 
   // Auto-select test from URL param (e.g., from Architecture page link).
   // R29.6 — when test_id doesn't match (e.g. pytest nodeid), fall back

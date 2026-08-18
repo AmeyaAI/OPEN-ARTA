@@ -235,7 +235,18 @@ def _read_cache(project_id: str) -> dict | None:
     try:
         if time.time() - p.stat().st_mtime > _TTL_SEC:
             return None
-        return json.loads(p.read_text())
+        spec = json.loads(p.read_text())
+        # R330 P2b — a doc whose ops are ALL arta-merged stubs (persist_openapi_doc)
+        # is NOT a fetched spec: it carries zero param constraints. Treating it as
+        # fresh starved param grounding for the full TTL. All-stub → cache miss.
+        paths = (spec or {}).get("paths")
+        if isinstance(paths, dict) and paths:
+            ops = [op for ms in paths.values() if isinstance(ms, dict)
+                   for op in ms.values() if isinstance(op, dict)]
+            if ops and all(op.get("x-arta-stub") or op.get("summary") == "arta-openapi-ingested"
+                           for op in ops):
+                return None
+        return spec
     except Exception as exc:
         log.debug("R18a: cache read failed for %s: %s", project_id, exc)
         return None

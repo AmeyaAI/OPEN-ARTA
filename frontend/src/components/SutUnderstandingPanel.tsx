@@ -63,7 +63,12 @@ export default function SutUnderstandingPanel({ projectId }: { projectId: string
   const t = cov.tests || {}
   const guessed = (t.grounded_by?.guess || 0)
   const flagged = t.potentially_incorrect_count || 0
-  const needsFix = guessed + flagged > 0
+  // P1d — distinct union from the backend (guess tests are usually also
+  // flagged; the old guess+flagged sum double-counted the CTA).
+  const needsFixCount = t.needs_attention_count ?? (guessed + flagged)
+  const needsFix = needsFixCount > 0
+  // P1d — gen-time fail-loud statuses ("unavailable:no_github_token" etc.)
+  const srcStatuses = Object.entries(t.source_grounding || {}).filter(([k]) => k.startsWith('unavailable'))
 
   return (
     <div className="glass-card p-5">
@@ -81,6 +86,11 @@ export default function SutUnderstandingPanel({ projectId }: { projectId: string
         color: '#cbd5e1',
       }}>
         {cov.source_grounding_available ? '✓ ' : '⚠ '}{cov.note}
+        {srcStatuses.length > 0 && (
+          <div className="mt-1" style={{ color: '#fb7185' }}>
+            {srcStatuses.map(([k, n]) => `${n} test${n === 1 ? '' : 's'} generated with source grounding ${k.replace('unavailable:', 'unavailable (') + ')'}`).join(' · ')}
+          </div>
+        )}
       </div>
 
       {/* Endpoint grounding — known-real vs the aspirational source-grounded target */}
@@ -115,12 +125,12 @@ export default function SutUnderstandingPanel({ projectId }: { projectId: string
         <div className="text-[11px] mb-3" style={{ color: '#64748b' }}>No generated tests analyzed yet.</div>
       )}
 
-      {/* Close the loop — flagged/guessed tests are actionable, not just counted */}
+      {/* Close the loop — deep-link the EXACT flagged/guessed tests (P1d) */}
       {needsFix && (
-        <Link href="/test-explorer"
+        <Link href={`/test-explorer?flag=needs_attention&project_id=${encodeURIComponent(projectId)}`}
               className="inline-block px-3 py-1.5 rounded-lg text-xs font-medium"
               style={{ background: 'linear-gradient(135deg,#fb7185,#f97316)', color: '#fff' }}>
-          {guessed + flagged} tests need grounding — Refine with AI →
+          {needsFixCount} tests need grounding — Refine with AI →
         </Link>
       )}
     </div>
