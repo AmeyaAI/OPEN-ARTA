@@ -4,7 +4,7 @@
 # AI / LLM
 anthropic>=0.40.0
 litellm>=1.55.0            # Multi-provider LLM adapter
-huggingface_hub>=0.23.0    # For upskill model integration
+huggingface_hub>=1.27.0    # For upskill model integration
 transformers>=4.40.0       # For upskill model integration
 
 # Web framework
