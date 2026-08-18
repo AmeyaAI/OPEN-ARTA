@@ -1189,7 +1189,11 @@ async def lifespan(app: FastAPI):
         embedding_task.cancel()
         try:
             await embedding_task
-        except (asyncio.CancelledError, Exception):
+        # BaseException: CancelledError stopped subclassing Exception in 3.8,
+        # and naming `asyncio` here hit UnboundLocalError (conditional local
+        # `import asyncio` earlier in this function shadows the module) —
+        # every shutdown ended with "Application shutdown failed. Exiting."
+        except BaseException:
             pass
 
     # R75.4 — cancel auth-staleness poller on shutdown
@@ -1198,7 +1202,7 @@ async def lifespan(app: FastAPI):
         poller_task.cancel()
         try:
             await poller_task
-        except (asyncio.CancelledError, Exception):
+        except BaseException:   # see embedding_task note above
             pass
 
     try:
