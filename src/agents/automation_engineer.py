@@ -3892,6 +3892,22 @@ class AutomationEngineerAgent:
                         len(_bk6_block.splitlines()), req_id)
             except Exception as _bk6_exc:
                 log.debug("R217: batch k6 grounding skipped for %s: %s", req_id, _bk6_exc)
+        # R330 P5b — AC-grouped k6 checks, batch parity. The constraint lives
+        # in K6_GENERATION for the sequential path, but the batch path composes
+        # its own prompt (the R219.K lesson: a gen fix in one path silently
+        # skips the others — live-verified: batch k6 emitted 0 AC groups while
+        # the template path guarantees them). Own gate — independent of the
+        # R217 endpoint-grounding killswitch.
+        if any(t == "k6" for t, _ in tools_needed):
+            prompt += (
+                "\n[R330 P5b HARD CONSTRAINT — the k6 SECTION MUST WRAP CHECKS "
+                "IN AC-NAMED GROUPS]\n"
+                "Import { group } from 'k6' and wrap every check() in a "
+                "group('AC-<id>: <short summary>', () => { ... }) named with the "
+                "acceptance-criterion id copied EXACTLY from the Gherkin (never "
+                "renumber, never invent). One group per AC exercised — ARTA "
+                "reports each AC's pass/fail from these group names.\n"
+            )
 
         # R243 (BATCH path) — inject the SOURCE-DISCOVERED SUT LOGIN FLOWS so the
         # batch PW/Newman sections use the SUT's real login request. R219.K lesson:
