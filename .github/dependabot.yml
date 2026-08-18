@@ -14,6 +14,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: react
         update-types: ["version-update:semver-major"]
+      # Deferred majors — CI proved these break the current codebase
+      # (frontend-type-check red under eslint 10 / typescript 7). Revisit
+      # deliberately; minors/patches still flow.
+      - dependency-name: eslint
+        update-types: ["version-update:semver-major"]
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: pip
     directory: /
     schedule:
