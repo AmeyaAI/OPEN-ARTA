@@ -1,0 +1,74 @@
+---
+title: Enterprise
+description: The commercial edition of ARTA — org-level governance, SSO/SAML, audit trails, and fleet management on top of the free, complete open core.
+template: splash
+---
+
+<div class="arta-splash">
+
+<p class="arta-eyebrow">Enterprise</p>
+
+# The open core is complete. Enterprise adds the org layer.
+
+First, the part that matters to most readers: **the open-source project is
+useful on its own, and stays that way.** The entire single-team verification
+loop — generation for all six runtimes, execution, grounding validation,
+self-healing, truthful reports, single-project traceability, local LLMs,
+per-project RBAC — is Apache-2.0 and will never be metered or crippled. That
+boundary is written down in
+[ee/README.md](https://github.com/gangadharneeli/OPEN-ARTA/blob/main/ee/README.md)
+and enforced in code review.
+
+The commercial edition exists for what organizations need *across* teams:
+
+<div class="arta-grid" style="grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); margin-top: 2rem;">
+	<div>
+		<h3>Organizations &amp; governance</h3>
+		<p>An organization/team entity, a hosted control plane, and centralized
+		management across many projects and teams.</p>
+	</div>
+	<div>
+		<h3>SSO / SAML / SCIM</h3>
+		<p>Enterprise identity-provider integration and automated user
+		lifecycle management.</p>
+	</div>
+	<div>
+		<h3>Audit trails &amp; compliance</h3>
+		<p>Real, tamper-evident audit trails and compliance evidence exports —
+		the same truthfulness discipline, at audit grade.</p>
+	</div>
+	<div>
+		<h3>Cross-project analytics</h3>
+		<p>Cross-run and cross-project quality analytics, and fleet management
+		for many ARTA deployments.</p>
+	</div>
+	<div>
+		<h3>Advanced integrations</h3>
+		<p>Jira at scale and test-management-suite synchronization.</p>
+	</div>
+	<div>
+		<h3>Managed AI</h3>
+		<p>ARTA Intelligence (fine-tuned generation models) and managed LLM
+		inference for teams that don't want to run their own.</p>
+	</div>
+</div>
+
+## Where the line is drawn — in code
+
+The seam is
+[`src/api/entitlements.py`](https://github.com/gangadharneeli/OPEN-ARTA/blob/main/src/api/entitlements.py):
+the open core ships an allow-everything no-op; commercial editions install
+their own implementation. Contributions that move local-loop features behind
+that seam are rejected by policy — so the boundary can't quietly drift.
+
+## Talk to us
+
+The commercial edition is early. If your organization needs the org layer —
+or wants to shape it — open a conversation:
+
+<div style="display:flex; gap:.75rem; flex-wrap:wrap; margin-top:1.5rem">
+	<a class="arta-btn arta-btn-primary" href="https://github.com/gangadharneeli/OPEN-ARTA/discussions">Talk to us →</a>
+	<a class="arta-btn arta-btn-ghost" href="/OPEN-ARTA/docs/getting-started/">Or just use the free core</a>
+</div>
+
+</div>

@@ -1,0 +1,250 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   ARTA site theme — "audit-grade" editorial-terminal.
+   Dark graphite base, amber verdict accent, hairline rules, Bricolage
+   Grotesque display + IBM Plex Mono. PASS/FAIL greens/reds are reserved for
+   evidence marks (terminal output, diagrams) — never decoration.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+:root {
+	/* Typography */
+	--sl-font: 'Bricolage Grotesque Variable', ui-sans-serif, system-ui, sans-serif;
+	--sl-font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+	/* Verdict semantics (shared by both themes; used in visuals only) */
+	--arta-pass: #4cc38a;
+	--arta-fail: #e5534b;
+	--arta-blocked: #d29922;
+
+	/* Dark theme (default) — graphite + amber */
+	--arta-ink: #0c0e12;
+	--arta-panel: #12151b;
+	--arta-panel-2: #171b23;
+	--arta-line: #262c37;
+	--arta-line-strong: #39414f;
+	--arta-amber: #e8a33d;
+	--arta-amber-hi: #f5c069;
+
+	--sl-color-accent-low: #3a2a10;
+	--sl-color-accent: var(--arta-amber);
+	--sl-color-accent-high: var(--arta-amber-hi);
+	--sl-color-white: #f2f0eb;
+	--sl-color-gray-1: #e5e2da;
+	--sl-color-gray-2: #b8b5ad;
+	--sl-color-gray-3: #8a8880;
+	--sl-color-gray-4: #4d5361;
+	--sl-color-gray-5: var(--arta-line);
+	--sl-color-gray-6: var(--arta-panel);
+	--sl-color-black: var(--arta-ink);
+	--sl-color-bg-nav: color-mix(in srgb, var(--arta-ink) 88%, transparent);
+	--sl-color-hairline: var(--arta-line);
+}
+
+:root[data-theme='light'] {
+	/* Light theme — audit paper + burnt amber */
+	--arta-ink: #faf8f3;
+	--arta-panel: #f1eee6;
+	--arta-panel-2: #e9e5da;
+	--arta-line: #d9d4c7;
+	--arta-line-strong: #b9b2a0;
+	--arta-amber: #8a5b06;
+	--arta-amber-hi: #6e4805;
+
+	--arta-pass: #1a7f4e;
+	--arta-fail: #c62f28;
+	--arta-blocked: #915f04;
+
+	--sl-color-accent-low: #f3e3c3;
+	--sl-color-accent: var(--arta-amber);
+	--sl-color-accent-high: var(--arta-amber-hi);
+	--sl-color-white: #191713;
+	--sl-color-gray-1: #26231d;
+	--sl-color-gray-2: #45413a;
+	--sl-color-gray-3: #6b665c;
+	--sl-color-gray-4: #a29b8c;
+	--sl-color-gray-5: var(--arta-line);
+	--sl-color-gray-6: var(--arta-panel);
+	--sl-color-gray-7: #f1eee6;
+	--sl-color-black: var(--arta-ink);
+	--sl-color-bg-nav: color-mix(in srgb, var(--arta-ink) 88%, transparent);
+}
+
+/* ── Global typographic voice ──────────────────────────────────────────────── */
+
+h1, h2, h3, h4,
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3 {
+	font-family: var(--sl-font);
+	font-variation-settings: 'wdth' 87, 'opsz' 28;
+	letter-spacing: -0.015em;
+	font-weight: 640;
+}
+
+.site-title {
+	font-variation-settings: 'wdth' 80;
+	font-weight: 700;
+	letter-spacing: 0.01em;
+}
+
+header.header { backdrop-filter: blur(10px); }
+
+/* ── Shared landing primitives (homepage + splash pages) ───────────────────── */
+
+.arta-eyebrow {
+	font-family: var(--sl-font-mono);
+	font-size: 0.72rem;
+	font-weight: 500;
+	letter-spacing: 0.18em;
+	text-transform: uppercase;
+	color: var(--sl-color-accent);
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	margin: 0 0 1rem;
+}
+.arta-eyebrow::before {
+	content: '';
+	width: 1.6rem;
+	height: 1px;
+	background: var(--sl-color-accent);
+	flex: none;
+}
+
+.arta-section {
+	max-width: 72rem;
+	margin: 0 auto;
+	padding: 5rem 1.25rem 0;
+}
+.arta-section > h2 {
+	font-size: clamp(1.7rem, 3.4vw, 2.4rem);
+	line-height: 1.12;
+	margin: 0 0 0.75rem;
+	color: var(--sl-color-white);
+}
+.arta-section > .arta-lede {
+	max-width: 44rem;
+	color: var(--sl-color-gray-2);
+	font-size: 1.05rem;
+	line-height: 1.6;
+	margin: 0 0 2.25rem;
+}
+
+/* Hairline-grid card fields: cards share borders like ledger cells. */
+.arta-grid {
+	display: grid;
+	gap: 1px;
+	background: var(--arta-line);
+	border: 1px solid var(--arta-line);
+}
+.arta-grid > * { background: var(--arta-panel); padding: 1.5rem; }
+.arta-grid h3 {
+	font-size: 1.02rem;
+	margin: 0 0 0.5rem;
+	color: var(--sl-color-white);
+}
+.arta-grid p { margin: 0; font-size: 0.92rem; line-height: 1.55; color: var(--sl-color-gray-2); }
+.arta-grid .arta-cell-tag {
+	font-family: var(--sl-font-mono);
+	font-size: 0.68rem;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: var(--sl-color-gray-3);
+	display: block;
+	margin-bottom: 0.85rem;
+}
+
+/* Buttons */
+.arta-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+	font-family: var(--sl-font-mono);
+	font-size: 0.88rem;
+	font-weight: 500;
+	padding: 0.7rem 1.3rem;
+	border: 1px solid var(--sl-color-accent);
+	text-decoration: none;
+	transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.arta-btn-primary {
+	background: var(--sl-color-accent);
+	color: var(--arta-ink);
+}
+:root[data-theme='light'] .arta-btn-primary { color: #fff; }
+.arta-btn-primary:hover { background: var(--sl-color-accent-high); border-color: var(--sl-color-accent-high); }
+.arta-btn-ghost { color: var(--sl-color-white); border-color: var(--arta-line-strong); }
+.arta-btn-ghost:hover { border-color: var(--sl-color-accent); color: var(--sl-color-accent); }
+
+/* Terminal panel */
+.arta-term {
+	background: #0a0c10;
+	border: 1px solid var(--arta-line);
+	font-family: var(--sl-font-mono);
+	font-size: 0.84rem;
+	line-height: 1.7;
+	overflow-x: auto;
+}
+:root[data-theme='light'] .arta-term { border-color: #2a2f3a; }
+.arta-term-bar {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.55rem 0.9rem;
+	border-bottom: 1px solid #1c212b;
+	color: #6f7684;
+	font-size: 0.7rem;
+	letter-spacing: 0.08em;
+}
+.arta-term-bar i {
+	width: 9px; height: 9px; border-radius: 50%;
+	background: #2c323e; display: inline-block;
+}
+.arta-term pre {
+	margin: 0;
+	padding: 1rem 1.1rem 1.2rem;
+	background: none;
+	color: #cdd3dc;
+	white-space: pre;
+}
+.arta-term .t-cmd { color: #f2f0eb; }
+.arta-term .t-cmt { color: #5c6472; }
+.arta-term .t-amber { color: #e8a33d; }
+.arta-term .t-pass { color: #4cc38a; }
+.arta-term .t-fail { color: #e5534b; }
+.arta-term .t-dim { color: #7b828f; }
+
+/* Verdict chips used in diagrams */
+.arta-chip {
+	font-family: var(--sl-font-mono);
+	font-size: 0.68rem;
+	letter-spacing: 0.08em;
+	padding: 0.14rem 0.5rem;
+	border: 1px solid currentColor;
+}
+.arta-chip.pass { color: var(--arta-pass); }
+.arta-chip.fail { color: var(--arta-fail); }
+.arta-chip.blocked { color: var(--arta-blocked); }
+
+/* Footer of landing pages */
+.arta-foot-rule {
+	max-width: 72rem;
+	margin: 5rem auto 0;
+	border-top: 1px solid var(--arta-line);
+}
+
+/* Splash pages (community / roadmap / enterprise) share the section rhythm. */
+.arta-splash .sl-markdown-content h2 { margin-top: 3rem; }
+
+/* Custom pages render their own h1 — hide Starlight's default title panel. */
+main:has(.arta-home, .arta-splash) > .content-panel:has(> .sl-container > h1#_top) {
+	display: none;
+}
+
+/* Reduced motion: kill all site animation. */
+@media (prefers-reduced-motion: reduce) {
+	*, *::before, *::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+	}
+}

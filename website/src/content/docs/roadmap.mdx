@@ -1,0 +1,71 @@
+---
+title: Roadmap
+description: What ARTA has shipped, what is being worked on now, and the direction it is headed — honestly labeled, never speculative-as-committed.
+template: splash
+---
+
+<div class="arta-splash">
+
+<p class="arta-eyebrow">Roadmap</p>
+
+# Now, next, later.
+
+An honest roadmap follows the same rule as an honest test report: don't
+present hope as fact. Items below are labeled **shipped**, **in progress**,
+or **direction** — direction items are intentions, not commitments, and the
+source of truth is always the
+[repository](https://github.com/gangadharneeli/OPEN-ARTA) and its
+[changelog](https://github.com/gangadharneeli/OPEN-ARTA/blob/main/CHANGELOG.md).
+
+## Shipped <span class="arta-chip pass">v0.1.0</span>
+
+The first public release of the ARTA open core (August 2026) contains the
+whole single-team verification loop:
+
+- Grounded test generation for six runtimes — Playwright, Newman, k6,
+  OWASP ZAP, Axe, Pytest (Cypress and Selenium generate-only)
+- Grounding validators that reject hallucinated selectors, roles, and
+  endpoints at generation time
+- Execution with self-healing retries, and truthful failure classification
+  (`sut_regression` / `test_gen_bug` / `grounding_blocked`)
+- Requirement → test → result traceability graph (Neo4j)
+- Risk scoring (probability × impact) and ATDD Gherkin design
+- Local LLM by default (Ollama); Anthropic, OpenAI, and Gemini providers
+- Non-mutation guarantee enforced at three independent layers
+- Per-project RBAC and invites; fully documented opt-out telemetry
+
+## Now <span class="arta-chip blocked">in progress</span>
+
+Work currently visible in the repository's commit history:
+
+- **Deeper SUT understanding feeding generation** — request-body shapes from
+  source, captured parameter values, and protocol awareness flowing directly
+  into generated tests
+- **Traceability spine hardening** — canonical links from every executed test
+  row back to its requirement and acceptance criterion
+- **Grounding coverage reporting** — surfacing which generated tests are
+  source-grounded and which need attention
+
+## Next <span class="arta-chip blocked">planned</span>
+
+- Execution support for generated Cypress and Selenium scripts (generation
+  already ships; execution does not — the gap is documented, not hidden)
+- More requirement-source connectors beyond Jira / OpenAPI / documents
+- Richer CI/CD ergonomics for gate-driven pipelines
+
+## Later <span class="arta-chip fail">direction — not committed</span>
+
+- Broader protocol coverage in generation (GraphQL and event-driven APIs are
+  understood at discovery time today; generation coverage varies)
+- Traceability graph visualization in the dashboard
+- Community-driven SUT onboarding guides for common stacks
+
+## Influence it
+
+The roadmap bends toward evidence: a well-argued
+[discussion](https://github.com/gangadharneeli/OPEN-ARTA/discussions) or a
+reproducible [issue](https://github.com/gangadharneeli/OPEN-ARTA/issues)
+moves items between these lists. Contributions move them fastest — see the
+[contribution guide](/OPEN-ARTA/docs/contributing/).
+
+</div>

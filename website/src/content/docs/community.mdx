@@ -1,0 +1,65 @@
+---
+title: Community
+description: Build ARTA with us — GitHub Discussions, issues, contributions, and the guidelines that keep the project honest.
+template: splash
+---
+
+export const gh = 'https://github.com/gangadharneeli/OPEN-ARTA';
+
+<div class="arta-splash">
+
+<p class="arta-eyebrow">Community</p>
+
+# Build ARTA with us.
+
+ARTA is developed in the open by people who think a test report should be
+evidence, not decoration. Everything happens on GitHub — no gated Slack, no
+sign-up wall.
+
+<div class="arta-grid" style="grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); margin-top: 2rem;">
+	<a href={`${gh}/discussions`} style="text-decoration:none">
+		<h3>Discussions →</h3>
+		<p>Questions, ideas, design debates, show-and-tell. The right place to start
+		if you're not sure where something goes.</p>
+	</a>
+	<a href={`${gh}/issues`} style="text-decoration:none">
+		<h3>Issues →</h3>
+		<p>Bug reports and feature requests. A good bug report includes what ARTA
+		reported and what your system actually did.</p>
+	</a>
+	<a href="/OPEN-ARTA/docs/contributing/" style="text-decoration:none">
+		<h3>Contribution guide →</h3>
+		<p>Ground rules, the dev loop, and explicitly invited first contributions —
+		connectors, validators, runtime improvements, docs.</p>
+	</a>
+	<a href="/OPEN-ARTA/roadmap/" style="text-decoration:none">
+		<h3>Roadmap →</h3>
+		<p>What's shipped, what's in progress, and what's on the horizon — honestly
+		labeled.</p>
+	</a>
+	<a href={`${gh}/blob/main/CODE_OF_CONDUCT.md`} style="text-decoration:none">
+		<h3>Code of conduct →</h3>
+		<p>Contributor Covenant v2.1. Be someone people want to review code with.</p>
+	</a>
+	<a href={`${gh}/blob/main/SECURITY.md`} style="text-decoration:none">
+		<h3>Security policy →</h3>
+		<p>Found a vulnerability? Please report it privately per the security
+		policy — not in a public issue.</p>
+	</a>
+</div>
+
+## How decisions get made
+
+The project's review policies are written down and enforced: the local
+single-team loop stays free forever, truthful reporting beats flattering
+reporting, and no customer-specific defaults land in core. If a PR
+contradicts one of those, it doesn't merge — including ours. Read the
+[contributing guide](/OPEN-ARTA/docs/contributing/) before your first PR;
+a lightweight CLA is signed with a single PR comment.
+
+<div class="oss-cta" style="display:flex; gap:.75rem; flex-wrap:wrap; margin-top:2.5rem">
+	<a class="arta-btn arta-btn-primary" href={`${gh}`}>★ Star ARTA on GitHub</a>
+	<a class="arta-btn arta-btn-ghost" href={`${gh}/discussions`}>Start a discussion</a>
+</div>
+
+</div>
