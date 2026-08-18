@@ -26,7 +26,7 @@ tenacity>=9.0.0,<10.0    # Retry logic with exponential backoff
 httpx>=0.28.0            # Async HTTP for self-healing PR creation
 
 # Data validation
-pydantic>=2.10.0
+pydantic>=2.13.4
 email-validator>=2.3.0        # Required by Pydantic EmailStr (src/models/user.py)
 
 # Database migrations
