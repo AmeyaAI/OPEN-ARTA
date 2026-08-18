@@ -4,7 +4,7 @@
 # AI / LLM
 anthropic>=0.40.0
 litellm>=1.55.0            # Multi-provider LLM adapter
-huggingface_hub>=0.23.0    # For upskill model integration
+huggingface_hub>=1.27.0    # For upskill model integration
 transformers>=4.40.0       # For upskill model integration
 
 # Web framework
@@ -27,7 +27,7 @@ httpx>=0.28.0            # Async HTTP for self-healing PR creation
 
 # Data validation
 pydantic>=2.10.0
-email-validator>=2.0        # Required by Pydantic EmailStr (src/models/user.py)
+email-validator>=2.3.0        # Required by Pydantic EmailStr (src/models/user.py)
 
 # Database migrations
 alembic>=1.14.0
@@ -35,7 +35,7 @@ alembic>=1.14.0
 # Authentication / JWT
 python-jose[cryptography]>=3.3.0   # JWT signing + verification
 passlib[bcrypt]>=1.7.4             # Password hashing
-authlib>=1.3.1                     # OAuth Provider Integration
+authlib>=1.7.2                     # OAuth Provider Integration
 
 # F6-15: Rate limiting (Redis-backed). Without this, /generate-tests can be
 # spammed — single user can launch many parallel 30s+ LLM calls.
@@ -61,7 +61,7 @@ pytest-json-report>=1.5.0
 
 # Feature 6: Multi-format requirement ingestion
 python-docx>=1.2.0
-openpyxl>=3.1
+openpyxl>=3.1.5
 pdfplumber>=0.11.10
 atlassian-python-api>=4.0.7
 beautifulsoup4>=4.12
@@ -69,4 +69,4 @@ beautifulsoup4>=4.12
 # R262 — analytics pytest pillar: frozen_dataset returns real DataFrames (tests
 # index data["col"]); pyarrow lets the fixture generator emit canonical .parquet.
 pandas>=2.0
-pyarrow>=15.0
+pyarrow>=25.0.1
