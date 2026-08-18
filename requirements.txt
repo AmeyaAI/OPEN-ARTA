@@ -30,7 +30,7 @@ pydantic>=2.10.0
 email-validator>=2.3.0        # Required by Pydantic EmailStr (src/models/user.py)
 
 # Database migrations
-alembic>=1.14.0
+alembic>=1.19.1
 
 # Authentication / JWT
 python-jose[cryptography]>=3.3.0   # JWT signing + verification
