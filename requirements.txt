@@ -62,7 +62,7 @@ pytest-json-report>=1.5.0
 # Feature 6: Multi-format requirement ingestion
 python-docx>=1.2.0
 openpyxl>=3.1
-pdfplumber>=0.11
+pdfplumber>=0.11.10
 atlassian-python-api>=4.0.7
 beautifulsoup4>=4.12
 
