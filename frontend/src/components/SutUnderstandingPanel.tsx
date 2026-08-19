@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { fetchGroundingCoverage, type GroundingCoverage } from '@/lib/api-client'
+import { fetchGroundingCoverage, fetchAuthzModel, type GroundingCoverage, type AuthzModel } from '@/lib/api-client'
 
 const PROV_COLOR: Record<string, string> = {
   source_grounded: '#10b981',       // ARTA read the SUT's contract/source
@@ -52,10 +52,16 @@ function Bar({ dist }: { dist: Record<string, number> }) {
 
 export default function SutUnderstandingPanel({ projectId }: { projectId: string }) {
   const [cov, setCov] = useState<GroundingCoverage | null>(null)
+  const [authz, setAuthz] = useState<AuthzModel | null>(null)
 
   useEffect(() => {
     if (!projectId) { setCov(null); return }
     fetchGroundingCoverage(projectId).then(setCov).catch(() => setCov(null))
+  }, [projectId])
+
+  useEffect(() => {
+    if (!projectId) { setAuthz(null); return }
+    fetchAuthzModel(projectId).then(setAuthz).catch(() => setAuthz(null))
   }, [projectId])
 
   if (!cov || cov.disabled) return null
@@ -132,6 +138,19 @@ export default function SutUnderstandingPanel({ projectId }: { projectId: string
               style={{ background: 'linear-gradient(135deg,#fb7185,#f97316)', color: '#fff' }}>
           {needsFixCount} tests need grounding — Refine with AI →
         </Link>
+      )}
+
+      {/* Authorization model — the derived RBAC/authz understanding (defensive:
+          every field optional-chained so a backend shape change degrades). */}
+      {authz?.built && (
+        <div className="mt-4 pt-3" style={{ borderTop: '1px solid #1e1e3a' }}>
+          <div className="text-[11px] mb-1" style={{ color: '#94a3b8' }}>
+            Authorization model · {authz.summary?.authz_gated ?? 0} gated · {authz.summary?.exempt_auth_only ?? 0} exempt
+            {' · '}{authz.role_count ?? 0} roles · {authz.principal_count ?? 0} principals
+            {' · '}<span style={{ color: '#a5b4fc' }}>{authz.mechanism || 'rbac_scoped_catalog'}</span>
+          </div>
+          <Bar dist={authz.summary?.by_scope || {}} />
+        </div>
       )}
     </div>
   )
