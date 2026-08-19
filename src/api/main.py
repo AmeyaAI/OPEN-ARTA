@@ -1472,7 +1472,7 @@ async def build_authz_model_endpoint(project_id: str, request: Request = None):
     (not LLM-guessed) RBAC test generation.
 
     Reads the cached spec (`.arta/openapi/<pid>.json`). SUTs that do NOT serve
-    a machine-readable OpenAPI (e.g. k0rdent's SPA) may POST the spec body
+    a machine-readable OpenAPI (e.g. an SPA-only SUT) may POST the spec body
     directly: `{"openapi_doc": {...}}` — it is ingested without being cached.
 
     Returns the per-operation catalog summary: scope / visibility / auth-gated /
