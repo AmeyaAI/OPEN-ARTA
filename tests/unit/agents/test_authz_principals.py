@@ -11,10 +11,10 @@ CATALOG = {"role_permissions": {
 }}
 
 PRINCIPALS = [
-    {"id": "U20", "label": "org-viewer @ org=testorg", "login": "user1@testorg.example",
+    {"id": "U20", "label": "org-viewer @ org=testorg", "login": "u20-login-ref",
      "principal_type": "customer", "home_org": "testorg",
      "bindings": [{"role": "organizations-viewer", "scope": "org", "target": "testorg"}]},
-    {"id": "U3", "label": "iam-admin @ platform", "login": "iam-admin1@vendor.example",
+    {"id": "U3", "label": "iam-admin @ platform", "login": "u3-login-ref",
      "principal_type": "operator", "home_org": "vendor",
      "bindings": [{"role": "iam-admin", "scope": "platform", "target": ""}]},
 ]
@@ -22,7 +22,7 @@ PRINCIPALS = [
 
 def test_validation_flags_structural_and_catalog_issues():
     bad = PRINCIPALS + [
-        {"id": "U20", "login": "dup@x", "principal_type": "customer",   # duplicate id
+        {"id": "U20", "login": "dup-login", "principal_type": "customer",   # duplicate id
          "bindings": [{"role": "organizations-viewer", "scope": "org", "target": "t"}]},
         {"id": "BAD", "login": "", "principal_type": "customer",        # missing login
          "bindings": [{"role": "no-such-role", "scope": "org", "target": "t"}]},  # bad role
@@ -48,7 +48,7 @@ def test_effective_permissions_keyed_by_scope_target():
 
 
 def test_service_account_needs_no_bindings():
-    sa = [{"id": "SA1", "login": "svc-token", "principal_type": "service_account",
+    sa = [{"id": "SA1", "login": "svc-login", "principal_type": "service_account",
            "bindings": []}]
     assert P.validate_principals(sa, CATALOG)["valid"]
 
