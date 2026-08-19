@@ -203,3 +203,7 @@ data/upskill/_filtered_dataset.jsonl
 # SECURITY NOTE: secrets that were tracked before this cleanup
 # .arta/_e2e_jwt.txt) remain in git HISTORY after un-tracking. They expire
 # history (git filter-repo) or rotate the credentials.
+
+# gRPC stubs — runtime-generated from discovered .proto (grpc_stub_gen); build
+# artifacts, never tracked (regenerated per SUT from source).
+src/automation/python_tests/**/stubs/
