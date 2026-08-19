@@ -185,6 +185,36 @@ def test_g2_shape_summary_exposes_list_key():
     )["list_key"] == "clusters"
 
 
+def test_r305_i_grounds_items_pagination_hallucination():
+    """R305.I — the LLM asserts a generic `items` wrapper but the SUT returns
+    `{organizations:[…]}` ('expected {organizations:[…]}
+    to have property items'). Ground .property('items') + body.items → the real key."""
+    lines = [
+        "const body = pm.response.json();",
+        "pm.expect(body).to.have.property('items');",
+        "pm.expect(body.items.length).to.be.greaterThan(0);",
+        "body.items.forEach(o => { pm.expect(o).to.have.property('id'); });",
+    ]
+    new, n = _AE._r305_rewrite_body_array_lines(lines, "organizations")
+    blob = "\n".join(new)
+    assert n >= 3
+    assert "to.have.property('organizations')" in blob
+    assert "body.organizations.length" in blob
+    assert "body.organizations.forEach" in blob
+    assert "'items'" not in blob and "body.items" not in blob
+    # the item-level property('id') assertion is untouched (not 'items')
+    assert "to.have.property('id')" in blob
+
+
+def test_r305_i_noop_when_list_key_is_items():
+    # a SUT that genuinely paginates under `items` → no rewrite
+    lines = ["const body=pm.response.json();",
+             "pm.expect(body).to.have.property('items');",
+             "body.items.forEach(x=>{});"]
+    _, n = _AE._r305_rewrite_body_array_lines(lines, "items")
+    assert n == 0
+
+
 _DETAIL_SHAPE_EPS = [{
     "method": "GET",
     "path": "/v1/regions/us-texas-1/infrastructure/servers/{id}",
