@@ -50,82 +50,134 @@ _VERB_BY_METHOD = {
     "patch": "update", "delete": "delete",
 }
 
-# Domain segments ARTA recognises in a path (the manual matrix's permission
-# prefixes). Order matters only for logging; membership is what's used.
-_KNOWN_DOMAINS = ("iam", "compute", "infrastructure", "organizations",
-                  "auth", "workflow", "storage", "notifications", "audit")
-
 # A path segment is a variable placeholder when wrapped in braces.
 _PARAM_RE = re.compile(r"^\{.+\}$")
+
+# ── SUT authorization PROFILE — the ONLY place SUT-specific vocabulary lives ──
+#
+# The engine below is fully generic: it reads structure the OpenAPI standard
+# guarantees (path-param nesting, response codes, an x-* visibility key). A
+# profile only RENAMES/refines that generic output into a SUT's own taxonomy —
+# its scope-tier names, permission-prefix conventions, visibility folding.
+#
+# NEVER hard-code a specific SUT's vocabulary here. A profile is DATA, loaded
+# from the config layer (`.arta/authz_profile/<pid>.json`). The default below is
+# NEUTRAL: every SUT gets meaningful output with NO profile (scope = the owning
+# container's name, permission = <domain>.<resource>.<verb> from its own path
+# segments). A profile is an optional refinement, never a requirement.
+_PROFILE_DIR = Path(".arta/authz_profile")
+
+GENERIC_DEFAULT_PROFILE: dict = {
+    # container-segment name -> scope-tier label; "" (no owning container) uses
+    # `root_tier`. Empty => the generic fallback (tier = container name upper).
+    "scope_tiers": {},
+    "root_tier": "GLOBAL",
+    # any of these path segments forces the top tier (overrides container).
+    "scope_platform_markers": [],
+    "platform_tier": "PLATFORM",
+    # permission-prefix normalisation, e.g. {"organizations": "org"}.
+    "domain_aliases": {},
+    # which OpenAPI extension key carries portal/surface visibility.
+    "visibility_extension": "x-visibility",
+    # visibility values that, when BOTH present, fold to a single label.
+    "visibility_common_pair": ["public", "internal"],
+    "visibility_common_label": "common",
+    "visibility_default": "common",
+}
+
+
+def load_authz_profile(project_id: str | None) -> dict:
+    """The SUT profile from the config/data layer, merged over the neutral
+    default. Absent profile => pure-generic behaviour. Never raises."""
+    profile = dict(GENERIC_DEFAULT_PROFILE)
+    if not project_id:
+        return profile
+    p = _PROFILE_DIR / f"{project_id}.json"
+    if p.is_file():
+        try:
+            profile.update(json.loads(p.read_text()) or {})
+        except Exception as exc:
+            log.warning("authz_discovery: profile load failed for %s: %s "
+                        "— using generic default", project_id, exc)
+    return profile
 
 
 def _segments(path: str) -> list[str]:
     return [s for s in (path or "").split("/") if s]
 
 
-def derive_scope(path: str) -> str:
-    """PLATFORM | ORG | PROJECT | GLOBAL from path structure alone.
-
-    Matches the manual matrix's Scope column:
-      - a {project} placeholder anywhere         -> PROJECT
-      - a `/platform/` or `/admin/` segment      -> PLATFORM
-      - `/organizations/{param}/<more>` subroute -> ORG
-      - else (root lists, region-scoped platform
-        resources, /organizations root mutation) -> GLOBAL/PLATFORM fallback
-    Ambiguous region-scoped compute/infra routes resolve PLATFORM (they carry
-    platform permissions in the matrix); this is refined when the roleperms.go
-    catalog lands.
-    """
+def _scope_container(path: str) -> str:
+    """The owning resource-container: the DEEPEST named segment immediately
+    followed by an id param. Fully generic — `organizations/{}`, `tenants/{}`,
+    `accounts/{}`, `projects/{}` all resolve to that container's name. Empty for
+    a root collection (no owning id in the path)."""
     segs = _segments(path)
-    low = [s.lower() for s in segs]
-    if any(s in ("{project}", "{projectid}", "{project_id}") for s in low):
-        return "PROJECT"
-    if "platform" in low or "admin" in low:
-        return "PLATFORM"
-    # `/organizations/{param}` (with or without a deeper subpath) => ORG-scoped:
-    # the target is that org or its children (getOrganization, listMembers,
-    # listProjectsInOrg …). Bare `/organizations` (list/create, no id) is NOT
-    # ORG — it falls through to GLOBAL. NOTE: platform-admin mutations on an org
-    # root (deleteOrganization, suspend/resume) are ORG by path but PLATFORM by
-    # permission; only the roleperms.go catalog can split those — a known
-    # heuristic limit corrected at the catalog step.
-    for i, s in enumerate(low):
-        if s in ("organizations", "organization") and i + 1 < len(segs):
-            if _PARAM_RE.match(segs[i + 1]):
-                return "ORG"
-    # region-scoped compute/infrastructure without a project => platform-tier
-    if "compute" in low or "infrastructure" in low:
-        return "PLATFORM"
-    return "GLOBAL"
+    container = ""
+    for i, s in enumerate(segs):
+        if (i + 1 < len(segs) and _PARAM_RE.match(segs[i + 1])
+                and not _PARAM_RE.match(s)):
+            container = s.lower()   # keep the deepest (last wins)
+    return container
 
 
-def derive_permission(path: str, method: str) -> dict:
-    """Best-effort domain.resource.verb, tagged heuristic. Reliable parts
-    (domain, verb) are separated from the approximate part (resource) so the
-    later roleperms.go catalog can override cleanly."""
+def derive_scope(path: str, profile: dict | None = None) -> str:
+    """Scope tier from path structure, mapped through the SUT profile.
+
+    Generic path: a `scope_platform_marker` segment -> platform tier; else the
+    owning container's tier from `scope_tiers` (falling back to the container
+    name uppercased); no owning container -> `root_tier`. With NO profile every
+    SUT still gets a sensible tier derived from its own path vocabulary."""
+    profile = profile or GENERIC_DEFAULT_PROFILE
+    low = [s.lower() for s in _segments(path)]
+    for marker in profile.get("scope_platform_markers", []):
+        if marker in low:
+            return profile.get("platform_tier", "PLATFORM")
+    container = _scope_container(path)
+    tiers = profile.get("scope_tiers", {})
+    if container in tiers:
+        return tiers[container]
+    if not container:
+        return profile.get("root_tier", "GLOBAL")
+    return container.upper()
+
+
+def derive_permission(path: str, method: str, profile: dict | None = None) -> dict:
+    """Best-effort <domain>.<resource>.<verb> from path structure. domain/
+    resource are read from the SUT's own path segments (no hard-coded domain
+    list); `domain_aliases` normalises a container prefix (e.g. organizations ->
+    org). Tagged heuristic — the authoritative permission catalog (roleperms.go
+    or equivalent) overrides this at the next step."""
+    profile = profile or GENERIC_DEFAULT_PROFILE
+    aliases = profile.get("domain_aliases", {})
     segs = _segments(path)
     low = [s.lower() for s in segs]
     verb = _VERB_BY_METHOD.get((method or "").lower())
-    # LAST (most-specific) known domain wins: in `/organizations/{orgId}/iam/
-    # groups`, `organizations` is the SCOPE container and `iam` is the
-    # permission domain (matrix: iam.groups.read, not org.*).
-    di = next((i for i in range(len(low) - 1, -1, -1)
-               if low[i] in _KNOWN_DOMAINS), None)
-    domain = low[di] if di is not None else None
-    # normalise the org(anizations) domain prefix to the matrix's `org.`
-    domain_prefix = "org" if domain == "organizations" else domain
-    resource = None
-    if di is not None:
-        # first NON-param segment after the domain is the resource
-        for s in segs[di + 1:]:
-            if not _PARAM_RE.match(s):
-                resource = s.lower().replace("-", "")
+    container = _scope_container(path)
+    # resource = last non-param segment (the thing acted on).
+    ri = next((i for i in range(len(segs) - 1, -1, -1)
+               if not _PARAM_RE.match(segs[i])), None)
+    resource = low[ri].replace("-", "") if ri is not None else None
+    domain = None
+    if ri is not None and resource == container:
+        # operation ON the container itself (e.g. get/update the org) — the
+        # resource IS the scope; the true resource (settings/…) needs the
+        # catalog. domain = the container (aliased); resource unknown.
+        domain = aliases.get(container, container)
+        resource = None
+    elif ri is not None:
+        # domain = nearest preceding NON-param segment; if that is the container
+        # (resource directly owned by the scope), alias the container prefix.
+        for j in range(ri - 1, -1, -1):
+            if not _PARAM_RE.match(segs[j]):
+                domain = low[j]
                 break
-    guess = None
-    if domain_prefix and resource and verb:
-        guess = f"{domain_prefix}.{resource}.{verb}"
+        if domain is None or domain == container:
+            domain = aliases.get(container, container) if container else domain
+        else:
+            domain = aliases.get(domain, domain)
+    guess = f"{domain}.{resource}.{verb}" if (domain and resource and verb) else None
     return {
-        "domain": domain_prefix,
+        "domain": domain,
         "resource": resource,
         "verb": verb,
         "permission_guess": guess,
@@ -133,23 +185,24 @@ def derive_permission(path: str, method: str) -> dict:
     }
 
 
-def _map_visibility(x_visibility) -> str:
-    """x-visibility -> the matrix's Vis column. Both portal surfaces (public
-    AND internal) => common; a single surface keeps its name; empty => common."""
+def _map_visibility(x_visibility, profile: dict | None = None) -> str:
+    """Fold the SUT's visibility-extension value to a label. Generic: when BOTH
+    of `visibility_common_pair` are present -> `visibility_common_label`; a
+    single value keeps its name; empty -> `visibility_default`."""
+    profile = profile or GENERIC_DEFAULT_PROFILE
+    default = profile.get("visibility_default", "common")
     if x_visibility is None:
-        return "common"
+        return default
     vals = x_visibility if isinstance(x_visibility, list) else [x_visibility]
     vals = [str(v).strip().lower() for v in vals if str(v).strip()]
     if not vals:
-        return "common"
-    has_pub, has_int = "public" in vals, "internal" in vals
-    if has_pub and has_int:
-        return "common"
-    if has_int:
-        return "internal"
-    if has_pub:
-        return "public"
-    return "common"
+        return default
+    pair = [str(v).lower() for v in profile.get("visibility_common_pair", [])]
+    if pair and all(v in vals for v in pair):
+        return profile.get("visibility_common_label", "common")
+    if len(vals) == 1:
+        return vals[0]
+    return profile.get("visibility_common_label", "common")
 
 
 def _success_status(responses: dict) -> int | None:
@@ -162,11 +215,14 @@ def _success_status(responses: dict) -> int | None:
     return None
 
 
-def extract_authz_model(openapi_doc: dict) -> dict:
+def extract_authz_model(openapi_doc: dict, profile: dict | None = None) -> dict:
     """Parse an OpenAPI dict into the per-operation authz catalog. Works on a
-    bundled OR $ref'd spec: only response KEYS ('401'/'403'), x-visibility,
-    operationId and the path string are read — none of which need ref
-    resolution."""
+    bundled OR $ref'd spec: only response KEYS ('401'/'403'), the visibility
+    extension, operationId and the path string are read — none of which need ref
+    resolution. `profile` (SUT config-layer data) refines the generic output;
+    the neutral default is used when absent."""
+    profile = profile or GENERIC_DEFAULT_PROFILE
+    vis_key = profile.get("visibility_extension", "x-visibility")
     ops: list[dict] = []
     paths = (openapi_doc or {}).get("paths") or {}
     for path, item in paths.items():
@@ -177,13 +233,13 @@ def extract_authz_model(openapi_doc: dict) -> dict:
                 continue
             responses = op.get("responses") or {}
             resp_keys = {str(k) for k in responses}
-            perm = derive_permission(path, method)
+            perm = derive_permission(path, method, profile)
             ops.append({
                 "operationId": op.get("operationId") or f"{method.upper()} {path}",
                 "method": method.upper(),
                 "path": path,
-                "scope": derive_scope(path),
-                "visibility": _map_visibility(op.get("x-visibility")),
+                "scope": derive_scope(path, profile),
+                "visibility": _map_visibility(op.get(vis_key), profile),
                 "auth_required": "401" in resp_keys,
                 # exempt (self-service / public) = auth-required but NOT authz-gated
                 "auth_gated": "403" in resp_keys,
@@ -202,6 +258,7 @@ def extract_authz_model(openapi_doc: dict) -> dict:
             gated += 1
         elif o["auth_required"]:
             exempt += 1
+    profiled = profile is not GENERIC_DEFAULT_PROFILE and profile != GENERIC_DEFAULT_PROFILE
     return {
         "source": "openapi",
         "operation_count": len(ops),
@@ -212,7 +269,10 @@ def extract_authz_model(openapi_doc: dict) -> dict:
             "authz_gated": gated,
             "exempt_auth_only": exempt,
             "domains": sorted({o["domain"] for o in ops if o["domain"]}),
-            "permission_source": "heuristic (roleperms.go catalog not yet ingested)",
+            "permission_source": "heuristic (authoritative permission catalog "
+                                 "not yet ingested)",
+            # provenance: was a SUT profile applied, or pure-generic derivation?
+            "profile_applied": bool(profiled),
         },
     }
 
@@ -259,15 +319,17 @@ def build_authz_model(project_id: str, openapi_doc: dict | None = None) -> dict 
         log.info("authz_discovery: no OpenAPI spec for %s — authz model skipped "
                  "(RBAC gen stays LLM-grounded until a spec is available)", project_id)
         return None
-    model = extract_authz_model(doc)
+    profile = load_authz_profile(project_id)   # SUT config-layer data, or generic
+    model = extract_authz_model(doc, profile)
     if not model["operations"]:
         return None
     model["project_id"] = project_id
     persist_authz_model(project_id, model)
     s = model["summary"]
     log.info("authz_discovery: %s -> %d ops (%d authz-gated, %d exempt) "
-             "scopes=%s domains=%s", project_id, model["operation_count"],
-             s["authz_gated"], s["exempt_auth_only"], s["by_scope"], s["domains"])
+             "scopes=%s domains=%s profile=%s", project_id, model["operation_count"],
+             s["authz_gated"], s["exempt_auth_only"], s["by_scope"], s["domains"],
+             "sut" if s["profile_applied"] else "generic-default")
     return model
 
 
@@ -315,16 +377,24 @@ if __name__ == "__main__":  # smoke check
             "get": {"operationId": "listClusters",
                     "responses": {"200": {}, "401": {}, "403": {}}}},
     }}
-    m = extract_authz_model(_sample)
-    assert m["operation_count"] == 5, m["operation_count"]
-    by_id = {o["operationId"]: o for o in m["operations"]}
-    assert by_id["listGroups"]["scope"] == "ORG"
-    assert by_id["listGroups"]["permission_guess"] == "iam.groups.read"
-    assert by_id["createGroup"]["permission_guess"] == "iam.groups.create"
-    assert by_id["listOrganizations"]["auth_gated"] is False  # exempt
-    assert by_id["createOrganization"]["scope"] == "GLOBAL"
-    assert by_id["createOrganization"]["success_status"] == 202
-    assert by_id["listClusters"]["scope"] == "PROJECT"
-    assert by_id["listGroups"]["visibility"] == "common"
-    assert by_id["createOrganization"]["visibility"] == "internal"
-    print("authz_discovery self-check OK:", m["summary"])
+    # (1) GENERIC default — no SUT vocabulary: scope = the owning container's
+    # own name; universal axes (auth_gated/success/visibility) are exact.
+    g = {o["operationId"]: o for o in extract_authz_model(_sample)["operations"]}
+    assert g["listGroups"]["scope"] == "ORGANIZATIONS"      # container name
+    assert g["listClusters"]["scope"] == "PROJECTS"
+    assert g["createOrganization"]["scope"] == "GLOBAL"     # root_tier
+    assert g["listGroups"]["permission_guess"] == "iam.groups.read"
+    assert g["createGroup"]["permission_guess"] == "iam.groups.create"
+    assert g["listOrganizations"]["auth_gated"] is False    # exempt (401 only)
+    assert g["createOrganization"]["success_status"] == 202
+    assert g["listGroups"]["visibility"] == "common"
+
+    # (2) SUT PROFILE (config-layer data) refines to the SUT's taxonomy.
+    _profile = {"scope_tiers": {"organizations": "ORG", "projects": "PROJECT",
+                                "regions": "PLATFORM"},
+                "domain_aliases": {"organizations": "org"}}
+    s = {o["operationId"]: o for o in extract_authz_model(_sample, _profile)["operations"]}
+    assert s["listGroups"]["scope"] == "ORG"
+    assert s["listClusters"]["scope"] == "PROJECT"
+    assert s["listGroups"]["permission_guess"] == "iam.groups.read"  # inner domain
+    print("authz_discovery self-check OK (generic + profile)")
