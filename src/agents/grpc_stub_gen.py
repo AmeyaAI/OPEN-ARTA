@@ -12,12 +12,28 @@ the protoc errors rather than raising, so a partial compile is visible.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
 from pathlib import Path
 
 log = logging.getLogger("arta.grpc_stub_gen")
+
+_GRPC_SURFACE_DIR = Path(".arta/grpc")
+
+# READ-side gRPC method prefixes (R154 non-mutation). MIRRORS the canonical
+# `_R156_E_READ_METHOD_PREFIXES` in arta_runtime/grpc_helpers.py (kept in sync;
+# duplicated only to avoid importing a runtime module into the agents layer).
+_READ_METHOD_PREFIXES = (
+    "get", "list", "read", "inspect", "describe", "verify", "validate", "check",
+    "query", "search", "find", "lookup", "fetch", "show", "view", "stream",
+)
+
+
+def _is_read_method(name: str) -> bool:
+    n = (name or "").lower()
+    return any(n.startswith(p) for p in _READ_METHOD_PREFIXES)
 
 # protoc's grpc_python_out emits an ABSOLUTE sibling import (`import foo_pb2 as
 # foo__pb2`) that only resolves when the output dir is on sys.path. Rewriting it
@@ -112,3 +128,89 @@ async def generate_project_grpc_stubs(project: dict, *, out_dir: str | None = No
     res = compile_protos(proto_files, out_dir or DEFAULT_STUB_DIR)
     res["proto_count"] = len(proto_files)
     return res
+
+
+# ── Durable gRPC SURFACE (understanding → feeds gen) ──────────────────────────
+
+def build_grpc_surface(proto_files: list[dict]) -> dict:
+    """A durable, gen-ready description of the SUT's gRPC surface from its
+    `.proto` files: per service the exact stub imports + methods with request/
+    response message names + a READ-side flag (R154). `proto_files` = [{path,
+    text}] (from fetch_files_by_extension). Deterministic; reuses parse_proto.
+
+    Returns {services: [{name, stub_pb2, stub_grpc, stub_class, methods:[{name,
+    request, response, streaming, read_side}]}], stub_modules: [...]}."""
+    from .protocol_discovery import parse_proto
+    services: list[dict] = []
+    stub_modules: list[str] = []
+    for pf in (proto_files or []):
+        stem = Path(pf.get("path") or "").stem
+        if not stem or not pf.get("text"):
+            continue
+        parsed = parse_proto(pf["text"])
+        if not parsed.get("services"):
+            continue
+        pb2, pb2_grpc = f"{stem}_pb2", f"{stem}_pb2_grpc"
+        for m in (pb2, pb2_grpc):
+            if m not in stub_modules:
+                stub_modules.append(m)
+        for svc in parsed["services"]:
+            services.append({
+                "name": svc["name"], "stub_pb2": pb2, "stub_grpc": pb2_grpc,
+                "stub_class": f"{svc['name']}Stub",
+                "methods": [{"name": mth["name"], "request": mth.get("request"),
+                             "response": mth.get("response"),
+                             "streaming": bool(mth.get("streaming")),
+                             "read_side": _is_read_method(mth["name"])}
+                            for mth in (svc.get("methods") or [])],
+            })
+    return {"services": services, "stub_modules": sorted(set(stub_modules))}
+
+
+def persist_grpc_surface(project_id: str, surface: dict) -> None:
+    """Write the gRPC surface to `.arta/grpc/<pid>.json` (only when non-empty)."""
+    if not project_id or not (surface or {}).get("services"):
+        return
+    _GRPC_SURFACE_DIR.mkdir(parents=True, exist_ok=True)
+    (_GRPC_SURFACE_DIR / f"{project_id}.json").write_text(json.dumps(surface, indent=2))
+
+
+def load_grpc_surface(project_id: str) -> dict:
+    """Read the persisted gRPC surface; {} when absent/unreadable."""
+    p = _GRPC_SURFACE_DIR / f"{project_id}.json"
+    if not p.is_file():
+        return {}
+    try:
+        return json.loads(p.read_text())
+    except Exception:
+        return {}
+
+
+def grpc_surface_prompt_block(project_id: str, *, max_services: int = 8) -> str:
+    """Gen-grounding block naming the SUT's REAL gRPC services/methods/messages +
+    the exact stub imports, so gen emits a correct test instead of the R156.E
+    placeholder example. READ-side methods flagged (R154). "" when no surface.
+    Killswitch ARTA_GRPC_GROUNDING_DISABLE."""
+    if os.environ.get("ARTA_GRPC_GROUNDING_DISABLE") == "1":
+        return ""
+    services = (load_grpc_surface(project_id) or {}).get("services") or []
+    if not services:
+        return ""
+    lines = [
+        "[gRPC SURFACE (discovered from the SUT's .proto — use these EXACT names)]",
+        "Use the canonical client `from src.automation.python_tests.arta_runtime."
+        "grpc_helpers import GrpcClient` + the compiled stubs. Call READ-side (read)",
+        "methods by default; write methods need the R154 destructive opt-in.",
+    ]
+    for svc in services[:max_services]:
+        lines.append(
+            f"  service {svc['name']}  "
+            f"(from .stubs import {svc['stub_pb2']}, {svc['stub_grpc']}; "
+            f"stub = {svc['stub_grpc']}.{svc['stub_class']})")
+        for m in (svc.get("methods") or [])[:12]:
+            flag = "read" if m.get("read_side") else "write(opt-in)"
+            lines.append(f"      rpc {m['name']}({m.get('request')}) "
+                         f"-> {m.get('response')}  [{flag}]")
+    lines.append("Build the request via <stub_pb2>.<RequestMessage>(...) and call "
+                 "client.call(<stub_grpc>.<Service>Stub, '<Method>', req).")
+    return "\n".join(lines) + "\n"

@@ -579,14 +579,23 @@ async def run(*, project: dict, project_id: str, neo4j_driver: Any = None,
             # returns 0 `.proto` for a private SUT auth service (the gRPC blind
             # spot). Fall back to the org-wide code search when no repos are
             # configured / the tree-walk finds nothing.
-            _proto_texts = [pf["text"]
-                            for pf in await _ghc.fetch_files_by_extension(project, ".proto", cap=10)]
-            if not _proto_texts:
-                _proto_texts = await _p3_fetch_hits("rpc extension:proto", 5)
-            for _txt in _proto_texts:
-                _pp = _proto_p3.parse_proto(_txt)
+            _proto_files = await _ghc.fetch_files_by_extension(project, ".proto", cap=10)
+            if not _proto_files:
+                _proto_files = [{"path": f"hit{_i}.proto", "text": _t}
+                                for _i, _t in enumerate(await _p3_fetch_hits("rpc extension:proto", 5))]
+            for _pf in _proto_files:
+                _pp = _proto_p3.parse_proto(_pf.get("text") or "")
                 _proto_agg["services"].extend(_pp.get("services") or [])
                 _proto_agg["messages"].extend(_pp.get("messages") or [])
+            # Persist a durable, gen-ready gRPC SURFACE (services + methods +
+            # message names + read-side flags + stub imports) so generation can
+            # be grounded in the SUT's REAL rpc surface (understanding → gen).
+            if _proto_files and project_id:
+                try:
+                    from .grpc_stub_gen import build_grpc_surface, persist_grpc_surface
+                    persist_grpc_surface(project_id, build_grpc_surface(_proto_files))
+                except Exception as _gs_exc:
+                    log.debug("grpc surface persist skipped for %s: %s", project_id, _gs_exc)
             _channels: list[dict] = []
             for _q in ("KafkaListener", "RabbitTemplate", "nats.connect"):
                 for _txt in await _p3_fetch_hits(_q, 3):

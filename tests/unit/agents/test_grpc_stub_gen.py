@@ -57,3 +57,54 @@ def test_no_proto_files(tmp_path):
 def test_killswitch(tmp_path, monkeypatch):
     monkeypatch.setenv("ARTA_GRPC_STUB_GEN_DISABLE", "1")
     assert compile_protos([_PROTO], tmp_path / "stubs")["disabled"] is True
+
+
+# ── gRPC SURFACE (understanding → feeds gen) ──────────────────────────────────
+
+from src.agents import grpc_stub_gen as gsg  # noqa: E402
+
+_SURFACE_PROTO = {
+    "path": "src/app/authorization.proto",
+    "text": (
+        'syntax = "proto3";\n'
+        "service AuthorizationService {\n"
+        "  rpc Authenticate (AuthenticationRequest) returns (AuthenticationResponse);\n"
+        "  rpc GetPolicy (GetPolicyRequest) returns (Policy);\n"
+        "  rpc CreatePrimaryPolicy (CreatePrimaryPolicyRequest) returns (Policy);\n"
+        "}\n"
+    ),
+}
+
+
+def test_build_surface_classifies_read_side():
+    surface = gsg.build_grpc_surface([_SURFACE_PROTO])
+    svc = surface["services"][0]
+    assert svc["name"] == "AuthorizationService"
+    assert svc["stub_pb2"] == "authorization_pb2"
+    assert svc["stub_grpc"] == "authorization_pb2_grpc"
+    assert svc["stub_class"] == "AuthorizationServiceStub"
+    read = {m["name"]: m["read_side"] for m in svc["methods"]}
+    assert read["GetPolicy"] is True                    # get* → read
+    assert read["Authenticate"] is False                # not a read prefix
+    assert read["CreatePrimaryPolicy"] is False         # create* → write
+    assert "authorization_pb2_grpc" in surface["stub_modules"]
+
+
+def test_persist_load_and_prompt_block(tmp_path, monkeypatch):
+    monkeypatch.setattr(gsg, "_GRPC_SURFACE_DIR", tmp_path)
+    gsg.persist_grpc_surface("pid", gsg.build_grpc_surface([_SURFACE_PROTO]))
+    assert gsg.load_grpc_surface("pid")["services"][0]["name"] == "AuthorizationService"
+    blk = gsg.grpc_surface_prompt_block("pid")
+    # names the real service + exact stub imports + the read/write flags
+    assert "AuthorizationService" in blk
+    assert "from .stubs import authorization_pb2, authorization_pb2_grpc" in blk
+    assert "GetPolicy" in blk and "[read]" in blk
+    assert "CreatePrimaryPolicy" in blk and "write(opt-in)" in blk
+
+
+def test_prompt_block_empty_and_killswitch(tmp_path, monkeypatch):
+    monkeypatch.setattr(gsg, "_GRPC_SURFACE_DIR", tmp_path)
+    assert gsg.grpc_surface_prompt_block("absent") == ""          # no surface
+    gsg.persist_grpc_surface("pid", gsg.build_grpc_surface([_SURFACE_PROTO]))
+    monkeypatch.setenv("ARTA_GRPC_GROUNDING_DISABLE", "1")
+    assert gsg.grpc_surface_prompt_block("pid") == ""             # killswitch
