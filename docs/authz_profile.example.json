@@ -1,5 +1,11 @@
 {
-  "_doc": "SUT authorization-profile TEMPLATE (generic placeholders — no real SUT). Copy to .arta/authz_profile/<project_id>.json and edit for a SUT. The authz_discovery engine is fully generic; this profile only RENAMES its structural output to the SUT's own taxonomy. Every field is OPTIONAL — omit any and the neutral default applies. NEVER commit a real SUT's profile (it is config-layer DATA; .arta/ is gitignored).",
+  "_doc": "SUT authorization-profile TEMPLATE (generic placeholders — no real SUT). Copy to .arta/authz_profile/<project_id>.json and edit for a SUT. The authz_discovery engine is fully generic; this profile only RENAMES its structural output to the SUT's own taxonomy AND selects the SUT's role MECHANISM. Every field is OPTIONAL — omit any and the neutral default applies. NEVER commit a real SUT's profile (it is config-layer DATA; .arta/ is gitignored).",
+
+  "authz_mechanism": "rbac_scoped_catalog",
+  "_authz_mechanism_doc": "How THIS SUT decides authorization — the oracle strategy. Options: 'rbac_scoped_catalog' (role->permission catalog + scope bindings + org carve-out; needs a permission catalog + principal `bindings`), 'oauth_scope' (token scope claims; principals carry `scopes`, ops carry `required_scope` — no catalog), 'simple_rbac' (route `allowed_roles` vs principal `roles`). Register more in authz_oracle. The principal-fixture fields differ per mechanism: bindings[] for rbac, scopes[] for oauth, roles[] for simple.",
+
+  "special_orgs": ["operator-org", "provider-org"],
+  "_special_orgs_doc": "rbac_scoped_catalog only: orgs where a platform grant is carved out (ignored) — a platform-admin gets 403 on these, not 200.",
 
   "scope_tiers": {
     "_doc": "map a path CONTAINER segment (the segment that owns an id param, e.g. `organizations` in /organizations/{orgId}/...) to this SUT's scope-tier label. Containers not listed fall back to the container name uppercased.",

@@ -85,3 +85,45 @@ def test_evaluate_matrix_shape_and_target_defaulting():
 def test_killswitch(monkeypatch):
     monkeypatch.setenv("ARTA_AUTHZ_ORACLE_DISABLE", "1")
     assert O.evaluate_matrix({"operations": [OP_LISTGROUPS]}, [U21], profile=PROFILE) == []
+
+
+# ── pluggable role MECHANISMS (each SUT differs) ──
+
+def test_oauth_scope_mechanism():
+    prof = {"authz_mechanism": "oauth_scope"}
+    op = {"operationId": "readThing", "auth_gated": True, "success_status": 200,
+          "required_scope": "things:read"}
+    assert O.expected_status(op, {"scopes": ["things:read"]}, "", {}, prof)["status"] == 200
+    assert O.expected_status(op, {"scopes": ["x"]}, "", {}, prof)["tag"] == "TS-4"
+    # exempt still short-circuits regardless of mechanism
+    ex = {"operationId": "pub", "auth_gated": False, "success_status": 200}
+    assert O.expected_status(ex, {"scopes": []}, "", {}, prof)["status"] == 200
+
+
+def test_simple_rbac_mechanism():
+    prof = {"authz_mechanism": "simple_rbac"}
+    op = {"operationId": "adminOnly", "auth_gated": True, "success_status": 201,
+          "allowed_roles": ["admin", "owner"]}
+    assert O.expected_status(op, {"roles": ["owner"]}, "", {}, prof)["status"] == 201
+    assert O.expected_status(op, {"roles": ["viewer"]}, "", {}, prof)["tag"] == "TS-4"
+
+
+def test_unknown_mechanism_falls_back_to_default():
+    # never a silent wrong verdict — falls back to rbac_scoped_catalog
+    r = O.expected_status(OP_LISTGROUPS, U21, "testcustomer", CATALOG,
+                          {"authz_mechanism": "no-such"})
+    assert r["tag"] == "TS-3"
+
+
+def test_register_custom_mechanism():
+    O.register_authz_model("always_403",
+                           lambda op, p, org, ctx: {"status": 403, "tag": "TS-4", "reason": "x"})
+    r = O.expected_status(OP_LISTGROUPS, U21, "testcustomer", CATALOG,
+                          {"authz_mechanism": "always_403"})
+    assert r["status"] == 403
+
+
+def test_default_mechanism_is_rbac_scoped_catalog():
+    # no authz_mechanism in profile => the k0rdent-class RBAC model (carve-out).
+    r = O.expected_status(OP_LISTGROUPS, U3, "vendor", CATALOG, {"special_orgs": ["vendor"]})
+    assert r["tag"] == "TS-6"
