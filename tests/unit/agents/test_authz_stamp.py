@@ -61,3 +61,16 @@ def test_source_component_stamp():
     assert sc["components"][0] == {"key": "GET:/v1/orgs/{id}/groups", "file": "iam:groups.go"}
     assert tg.source_component_stamp([], mapped)["component_count"] == 0
     assert tg.source_component_stamp(matched, None)["component_count"] == 0
+
+
+# ── Data-Object stamp (domain-entity dimension per test) ──────────────────────
+
+def test_data_object_stamp():
+    entity_map = {"POST:/v1/widgets": "WidgetDto", "GET:/v1/widgets": "Widget"}
+    matched = ["POST:/v1/widgets", "GET:/v1/widgets", "GET:/v1/unmapped"]
+    do = tg.data_object_stamp(matched, entity_map)
+    assert do["object_count"] == 2
+    assert do["entities"] == ["Widget", "WidgetDto"]               # distinct, sorted
+    assert {"key": "POST:/v1/widgets", "entity": "WidgetDto"} in do["objects"]
+    assert tg.data_object_stamp([], entity_map)["object_count"] == 0
+    assert tg.data_object_stamp(matched, None)["object_count"] == 0

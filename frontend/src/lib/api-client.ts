@@ -1781,6 +1781,9 @@ export interface GroundingCoverage {
     needs_attention_count?: number
     // Code→API spine: tests whose endpoints resolve to a real SUT source file
     source_component_count?: number
+    // API→Data spine: tests touching a named SUT domain entity + distinct entities
+    data_object_count?: number
+    entities_under_test?: string[]
   }
   source_grounding_available?: boolean
   // P1d — component flags behind source_grounding_available

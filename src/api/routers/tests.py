@@ -5607,7 +5607,8 @@ async def generate_tests(body: GenerateRequest, request: Request):
             # traceability_gate.derive_grounded_by (unit-testable).
             from ...agents.traceability_gate import (
                 derive_grounded_by, prune_traceability,
-                source_component_stamp as _sc_stamp)
+                source_component_stamp as _sc_stamp,
+                data_object_stamp as _do_stamp)
             _cap_by_key = {
                 f"{e.get('method')}:{e.get('path')}": e
                 for e in (_captured or []) if isinstance(e, dict) and e.get('path')
@@ -5622,6 +5623,20 @@ async def generate_tests(body: GenerateRequest, request: Request):
                     _authz_model = _az_load(_pid)
                 except Exception as _az_load_exc:
                     log.debug("P2 authz stamp: model load skipped: %s", _az_load_exc)
+            # Data-Object dimension: load the SUT's OpenAPI entity index ONCE
+            # (METHOD:/path → component-schema entity) so each test can be stamped
+            # with the domain entities its endpoints read/write. One disk read for
+            # the whole batch; {} when the spec carries no component schemas.
+            _entity_map = {}
+            if _pid and os.environ.get("ARTA_TRACEABILITY_DATA_OBJECT_DISABLE") != "1":
+                try:
+                    from ...agents.sut_topology import openapi_entity_index as _oei
+                    from pathlib import Path as _P2
+                    _op2 = _P2(".arta/openapi") / f"{_pid}.json"
+                    if _op2.is_file():
+                        _entity_map = _oei(json.loads(_op2.read_text()))
+                except Exception as _eidx_exc:
+                    log.debug("data-object stamp: entity index load skipped: %s", _eidx_exc)
             # R330 P1d — the gen-time source-grounding status (fail-loud): stamp it
             # per test so it persists with the gate verdicts and reaches the panel.
             _src_grounding = (getattr(auto_agent, "_r330_source_grounding_status", None)
@@ -5684,6 +5699,13 @@ async def generate_tests(body: GenerateRequest, request: Request):
                     if _sc["component_count"]:
                         _res["source_components"] = _sc
                         _t["metadata"]["source_components"] = _sc
+                # Data-Object dimension: the SUT domain entities (OpenAPI component
+                # schemas) the endpoints this test exercises read/write.
+                if _entity_map:
+                    _do = _do_stamp(_mk, _entity_map)
+                    if _do["object_count"]:
+                        _res["data_objects"] = _do
+                        _t["metadata"]["data_objects"] = _do
                 if _code_api_links:
                     _t["metadata"]["code_api_links"] = _code_api_links
                 if not _res["traceable"]:
@@ -5736,6 +5758,8 @@ async def generate_tests(body: GenerateRequest, request: Request):
                             _patch["authz_ungrounded"] = True
                         if _md.get("source_components"):
                             _patch["source_components"] = _md["source_components"]
+                        if _md.get("data_objects"):
+                            _patch["data_objects"] = _md["data_objects"]
                         await _s_r330.execute(_sqltext_r330(
                             "UPDATE test_cases SET metadata = COALESCE(metadata,'{}'::jsonb) "
                             "|| CAST(:patch AS jsonb), updated_at = NOW() "

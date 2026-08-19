@@ -286,6 +286,67 @@ def parse_openapi_spec(spec: dict, *, base_prefix: str = "") -> list[dict]:
     return out
 
 
+def _schema_entity(node) -> str | None:
+    """The named domain entity of a schema node: the $ref basename, unwrapping a
+    top-level array (`items.$ref`). None for inline/anonymous schemas."""
+    if not isinstance(node, dict):
+        return None
+    ref = node.get("$ref")
+    if isinstance(ref, str) and "/" in ref:
+        return ref.rsplit("/", 1)[-1] or None
+    items = node.get("items")
+    if isinstance(items, dict):
+        return _schema_entity(items)
+    return None
+
+
+def openapi_entity_index(spec: dict, *, base_prefix: str = "") -> dict:
+    """METHOD:/path → the OpenAPI domain ENTITY that operation reads/writes (the
+    component-schema `$ref` basename, e.g. `WidgetDto`). For a write (POST/PUT/PATCH)
+    prefer the requestBody entity; else the 2xx response entity. Handles OpenAPI 3
+    (`content.*.schema`) and Swagger 2 (`in:body` param / `responses.200.schema`).
+    Deterministic, SUT-agnostic; keys align with parse_openapi_spec / the
+    traceability matched_endpoint_keys. {} when the spec carries no schema refs."""
+    def _from_content(container) -> str | None:
+        for mt in (container or {}).values() if isinstance(container, dict) else []:
+            e = _schema_entity((mt or {}).get("schema")) if isinstance(mt, dict) else None
+            if e:
+                return e
+        return None
+
+    bp = (base_prefix or "").rstrip("/")
+    idx: dict = {}
+    for path, methods in (spec.get("paths") or {}).items():
+        if not isinstance(methods, dict):
+            continue
+        full = bp + path
+        for method, op in methods.items():
+            if not isinstance(op, dict) or method.lower() not in (
+                    "get", "post", "put", "patch", "delete", "head"):
+                continue
+            m = method.upper()
+            req = None
+            rb = op.get("requestBody")
+            if isinstance(rb, dict):
+                req = _from_content(rb.get("content"))
+            if req is None:  # Swagger 2 body param
+                for p in (op.get("parameters") or []):
+                    if isinstance(p, dict) and p.get("in") == "body":
+                        req = _schema_entity(p.get("schema"))
+                        if req:
+                            break
+            resp = None
+            for code, r in (op.get("responses") or {}).items():
+                if str(code).startswith("2") and isinstance(r, dict):
+                    resp = _from_content(r.get("content")) or _schema_entity(r.get("schema"))
+                    if resp:
+                        break
+            entity = (req if m in ("POST", "PUT", "PATCH") and req else None) or resp or req
+            if entity:
+                idx[f"{m}:{full}"] = entity
+    return idx
+
+
 async def fetch_openapi_endpoints(base_url: str, *, client=None) -> list[dict]:
     """Fetch + parse a service's OpenAPI spec from common locations
     (`/openapi.json`, `/swagger.json`, `/v3/api-docs`). `base_url` is the full
