@@ -10137,6 +10137,23 @@ async def _run_newman(
                         cmd.extend(["--env-var", f"{_ref}={_lv}"])
                         injected_keys.add(_ref)
                         continue
+                    # A durable, operator-set env variable the collection references
+                    # by name (e.g. RBAC role tokens like operator_token /
+                    # org_user_token, set via PUT .../variables) lands
+                    # in test_env but is NOT id-shaped, so the R217 filter above
+                    # skips it → item BLOCKED "unresolved" despite being set. A
+                    # {{var}} that exactly names a non-empty, non-placeholder
+                    # test_env key IS a deliberate reference — resolve it. Reserved
+                    # auth keys are already injected (in injected_keys) so this
+                    # never clobbers them.
+                    _tev = test_env.get(_ref)
+                    if _tev and str(_tev).strip() and str(_tev).strip() not in {
+                            "REPLACE_ME", "REPLACE-ME", "REPLACEME", "***", "REDACTED", "TODO"}:
+                        cmd.extend(["--env-var", f"{_ref}={_tev}"])
+                        injected_keys.add(_ref)
+                        log.info("Newman: resolved {{%s}} from durable env variable "
+                                 "(run %s)", _ref, run_id)
+                        continue
                     # A2 (defense-in-depth, NOT the primary fix) — a collection var
                     # the LLM named after the SUT's native bearer token
                     # (ACCESS_TOKEN, LESSEE_ACCESS_TOKEN, BEARER_TOKEN, JWT_TOKEN, …)
