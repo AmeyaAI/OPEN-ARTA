@@ -3697,6 +3697,23 @@ async def _real_execution_inner(run_id: str, build_id: str, body: RunRequest, pr
             or creds.get("access_token") or "",
             "bearer.token",
         )
+        # A static pasted bearer for a short-TTL SUT is structurally stale —
+        # it stays non-empty forever and wins every downstream priority chain
+        # (R95.1/R234) over the FRESH session token the auth_refresher
+        # maintains in storage state. Live: a 15-min-TTL SUT saw Newman 401
+        # 13/25 across three runs while the storage-state token returned 200
+        # on the same endpoint. Expired JWT ⇒ treat as absent so the
+        # storage-state fallbacks win. Non-JWT opaque tokens are untouched.
+        if _bt:
+            try:
+                from ...agents.auth_refresher import _is_jwt_expired
+                if _is_jwt_expired(_bt):
+                    log.warning(
+                        "C2: stored static bearer is EXPIRED — ignoring it; "
+                        "session token from storage-state will be used instead")
+                    _bt = ""
+            except Exception:
+                pass
         if not _bt:
             # Bearer tokens may also live in storage state's localStorage
             # under common refresh-token keys; tolerable best-effort.
