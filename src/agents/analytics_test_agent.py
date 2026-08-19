@@ -1024,6 +1024,24 @@ class AnalyticsTestAgent:
                 layer.get("name", "?"), _r124_c_exc,
             )
 
+        # gRPC surface grounding — when the SUT exposes gRPC (discovered .proto),
+        # make the R156.E constraint CONCRETE: name the real services/methods/
+        # message types + the exact stub imports so gen references the ACTUAL
+        # surface, not R156.E's placeholder example. Fail-open ""; killswitch
+        # ARTA_GRPC_GROUNDING_DISABLE inside the block.
+        try:
+            _pd = (recipe or {}).get("_project_dict") or {}
+            _pid_grpc = _pd.get("id") or _pd.get("project_id") or ""
+            if _pid_grpc:
+                from .grpc_stub_gen import grpc_surface_prompt_block
+                _grpc_blk = grpc_surface_prompt_block(_pid_grpc)
+                if _grpc_blk:
+                    base_prompt += "\n\n" + _grpc_blk
+                    log.info("R156.E: injected concrete gRPC surface (%d chars) into "
+                             "pytest gen for %s", len(_grpc_blk), layer.get("name", "?"))
+        except Exception as _grpc_blk_exc:
+            log.debug("gRPC surface injection skipped: %s", _grpc_blk_exc)
+
         # R47.4a — promote R44.1 grounding from WARN to retry-with-hint.
         # Pre-fix the validator emitted a warning + the spec persisted
         # with the drift baked in → 58/224 pytest fails. Now wrap gen
