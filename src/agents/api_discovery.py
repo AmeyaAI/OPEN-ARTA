@@ -1333,6 +1333,25 @@ def _load_captured_endpoints(project_id: str) -> list[dict]:
     except Exception as _r277_exc:
         log.debug("R277: requirement-endpoint merge skipped for %s: %s",
                   project_id, _r277_exc)
+    # Stamp each endpoint's PROTOCOL (rest/sse/grpc/graphql/websocket/…) so the
+    # classification is a DURABLE property every gen path sees — previously it was
+    # computed only inside the architecture api_graph (which staleable/separate),
+    # so gen read `endpoint.get("protocol")` as None → defaulted to REST and the
+    # SSE/gRPC/GraphQL gen paths never fired even when the endpoint was captured
+    # (e.g. an SSE `.../event/response-stream`). classify_protocol is a cheap pure
+    # token/mime heuristic (protocol_discovery — leaf module, no import cycle);
+    # never overrides an already-tagged endpoint. Killswitch
+    # ARTA_ENDPOINT_PROTOCOL_TAG_DISABLE.
+    if os.environ.get("ARTA_ENDPOINT_PROTOCOL_TAG_DISABLE") != "1":
+        try:
+            from .protocol_discovery import classify_protocol as _classify_proto
+            for _e in eps:
+                if isinstance(_e, dict) and _e.get("path") and not _e.get("protocol"):
+                    _e["protocol"] = _classify_proto(
+                        _e.get("path") or "", _e.get("content_type"),
+                        _e.get("summary") or "")
+        except Exception as _proto_exc:
+            log.debug("protocol tag skipped for %s: %s", project_id, _proto_exc)
     return eps
 
 

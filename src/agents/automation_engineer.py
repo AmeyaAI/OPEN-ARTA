@@ -6887,7 +6887,14 @@ test.describe('{req_id} — ARTA-generated', () => {{
                                 if isinstance(_st, (int, float)) and int(_st) > 0
                                 else ""
                             )
-                            _ep_strings.append(f"{_m} {_p}{_st_suffix}")
+                            # Surface a NON-REST protocol so the LLM applies the
+                            # matching HARD CONSTRAINT (R156.G SSE → sse_helpers,
+                            # R156.H websocket, gRPC/GraphQL). The durable tag comes
+                            # from classify_protocol at _load_captured_endpoints.
+                            _proto = _ep.get("protocol") or "rest"
+                            _proto_suffix = (f"  [protocol: {_proto}]"
+                                             if _proto and _proto != "rest" else "")
+                            _ep_strings.append(f"{_m} {_p}{_st_suffix}{_proto_suffix}")
                     _api_endpoints_raw = "\n".join(_ep_strings)
                     # R126.A — Ollama gets top-12 most relevant (vs top-50 for
                     # Claude). Reduces R98.3 block from ~3K → ~0.9K chars.
