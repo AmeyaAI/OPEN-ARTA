@@ -124,6 +124,6 @@ def test_register_custom_mechanism():
 
 
 def test_default_mechanism_is_rbac_scoped_catalog():
-    # no authz_mechanism in profile => the k0rdent-class RBAC model (carve-out).
+    # no authz_mechanism in profile => the catalog-RBAC model (carve-out).
     r = O.expected_status(OP_LISTGROUPS, U3, "vendor", CATALOG, {"special_orgs": ["vendor"]})
     assert r["tag"] == "TS-6"
