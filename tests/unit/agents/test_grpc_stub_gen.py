@@ -108,3 +108,29 @@ def test_prompt_block_empty_and_killswitch(tmp_path, monkeypatch):
     gsg.persist_grpc_surface("pid", gsg.build_grpc_surface([_SURFACE_PROTO]))
     monkeypatch.setenv("ARTA_GRPC_GROUNDING_DISABLE", "1")
     assert gsg.grpc_surface_prompt_block("pid") == ""             # killswitch
+
+
+# ── Deterministic gRPC read-test emitter ──────────────────────────────────────
+
+def test_emitter_reads_only_and_valid_python():
+    import ast
+    surface = gsg.build_grpc_surface([_SURFACE_PROTO])
+    src = gsg.build_grpc_read_test(surface)
+    ast.parse(src)                                               # syntactically valid
+    # only the read-side method emits a test; write/non-read methods omitted (R154)
+    assert "def test_authorizationservice_getpolicy" in src
+    assert "def test_authorizationservice_authenticate" not in src   # not a read prefix
+    assert "createprimarypolicy" not in src.lower()                  # write, omitted
+    # references the REAL stub + method + package-relative stub import
+    assert "from .stubs import authorization_pb2, authorization_pb2_grpc" in src
+    assert "authorization_pb2_grpc.AuthorizationServiceStub" in src
+    assert "'GetPolicy'" in src
+    assert src.count("\ndef test_") == 1                         # exactly the 1 read method
+
+
+def test_emitter_empty_when_no_read_methods():
+    # a proto whose only method is a write → no read-side test emitted
+    write_only = {"path": "x/w.proto", "text":
+                  'service S { rpc CreateThing (Req) returns (Resp); }\n'}
+    surface = gsg.build_grpc_surface([write_only])
+    assert gsg.build_grpc_read_test(surface) == ""

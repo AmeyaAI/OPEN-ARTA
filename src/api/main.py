@@ -1516,6 +1516,24 @@ async def build_authz_matrix_endpoint(project_id: str,
         project_id, include_successful_mutations=include_successful_mutations)
 
 
+@app.post("/api/admin/generate-grpc-tests",
+          dependencies=[Depends(_require_api_key)])
+async def generate_grpc_tests_endpoint(project_id: str):
+    """Deterministic gRPC gen chain for a project (no LLM): fetch its `.proto`
+    (git-tree walk of the configured repos) -> compile importable stubs -> emit
+    READ-side smoke pytest(s) that the pytest runner dispatches.
+
+    Prereqs (config-layer DATA): the project's `integrations.repositories` must
+    list the SUT's gRPC service repo(s) and a `GITHUB_TOKEN` must reach the
+    container. R154 non-mutation: only read-side rpc are emitted. Returns
+    {proto_count, stub_modules, read_tests, test_path, errors}; `proto_count: 0`
+    when no `.proto` is reachable (configure the repo / token)."""
+    from ..agents.grpc_stub_gen import generate_project_grpc_tests
+    from .routers.projects import _PROJECTS
+    project = _PROJECTS.get(project_id) or {"id": project_id}
+    return await generate_project_grpc_tests(project)
+
+
 @app.post("/api/admin/regen-queue/backfill",
           dependencies=[Depends(_require_api_key)])
 async def regen_queue_backfill(limit: int | None = None):

@@ -214,3 +214,82 @@ def grpc_surface_prompt_block(project_id: str, *, max_services: int = 8) -> str:
     lines.append("Build the request via <stub_pb2>.<RequestMessage>(...) and call "
                  "client.call(<stub_grpc>.<Service>Stub, '<Method>', req).")
     return "\n".join(lines) + "\n"
+
+
+# ── Deterministic gRPC read-side test emitter (no LLM) ────────────────────────
+
+def build_grpc_read_test(surface: dict, *, target_env: str = "GRPC_TARGET",
+                         stub_import: str = "stubs") -> str:
+    """A runnable pytest that read-smoke-tests every discovered READ-side rpc
+    (R154: reads only; write methods are omitted — no `allow_destructive`). Each
+    test builds a default request, calls via GrpcClient, and treats the endpoint
+    as reachable unless it returns UNIMPLEMENTED/UNAVAILABLE (transport/missing) —
+    application errors on the empty request still prove the endpoint EXISTS
+    (mirrors the Newman "not 5xx" / GraphQL "no errors" grounded-smoke pattern).
+    Deterministic; imports resolve against `compile_protos` output. "" when the
+    surface has no read-side rpc."""
+    services = (surface or {}).get("services") or []
+    read = [(svc, m) for svc in services for m in (svc.get("methods") or [])
+            if m.get("read_side")]
+    if not read:
+        return ""
+    pb2_mods = sorted({s["stub_pb2"] for s, _ in read} | {s["stub_grpc"] for s, _ in read})
+    out = [
+        '"""Auto-generated gRPC READ-side smoke tests (deterministic, R154 read-only).',
+        "Each verifies a discovered read rpc is REACHABLE; application-level errors on",
+        'the empty request are tolerated, UNIMPLEMENTED/UNAVAILABLE are failures."""',
+        "import os",
+        "import grpc",
+        "from src.automation.python_tests.arta_runtime.grpc_helpers import GrpcClient",
+        f"from .{stub_import} import " + ", ".join(pb2_mods),
+        "",
+        f'_TARGET = os.environ.get({target_env!r}, "localhost:50051")',
+        "_UNREACHABLE = (grpc.StatusCode.UNIMPLEMENTED, grpc.StatusCode.UNAVAILABLE)",
+        "",
+    ]
+    seen: set[str] = set()
+    for svc, m in read:
+        fn = f"test_{svc['name']}_{m['name']}".lower()
+        if fn in seen:
+            fn = f"{fn}_{len(seen)}"
+        seen.add(fn)
+        label = f"{svc['name']}.{m['name']}"
+        out += [
+            f"def {fn}():",
+            f"    with GrpcClient(_TARGET) as client:",
+            f"        req = {svc['stub_pb2']}.{m['request']}()",
+            "        try:",
+            f"            resp = client.call({svc['stub_grpc']}.{svc['stub_class']}, "
+            f"{m['name']!r}, req)",
+            "            assert resp is not None",
+            "        except grpc.RpcError as e:",
+            f"            assert e.code() not in _UNREACHABLE, "
+            f"{label!r} + ' unreachable: ' + str(e.code())",
+            "",
+        ]
+    return "\n".join(out)
+
+
+async def generate_project_grpc_tests(project: dict, *, tests_dir: str | None = None,
+                                      stubs_subdir: str = "stubs") -> dict:
+    """The full DETERMINISTIC gRPC gen chain for a project: fetch `.proto`
+    (tree-walk) → compile stubs into `<tests_dir>/<stubs_subdir>` → build the
+    surface → emit a read-side smoke test to `<tests_dir>/test_grpc_smoke.py`.
+    Returns {proto_count, stub_modules, read_tests, test_path, errors}. No LLM.
+    `{proto_count: 0}` when no `.proto` is reachable (fail-open)."""
+    from .github_context import fetch_files_by_extension
+    base = Path(tests_dir or str(Path(DEFAULT_STUB_DIR).parent))
+    proto_files = await fetch_files_by_extension(project, ".proto", cap=20)
+    if not proto_files:
+        return {"proto_count": 0, "read_tests": 0, "errors": ["no_proto_reachable"]}
+    stub_res = compile_protos(proto_files, base / stubs_subdir)
+    surface = build_grpc_surface(proto_files)
+    test_src = build_grpc_read_test(surface, stub_import=stubs_subdir)
+    result = {"proto_count": len(proto_files), "stub_modules": stub_res.get("modules", []),
+              "read_tests": test_src.count("\ndef test_"), "errors": stub_res.get("errors", [])}
+    if test_src:
+        base.mkdir(parents=True, exist_ok=True)
+        test_path = base / "test_grpc_smoke.py"
+        test_path.write_text(test_src)
+        result["test_path"] = str(test_path)
+    return result
