@@ -66,3 +66,39 @@ def test_killswitch(monkeypatch):
     monkeypatch.setenv("ARTA_AUTHZ_MATRIX_GEN_DISABLE", "1")
     out = G.generate_newman_collection([GET_NEG])
     assert out["collection"] is None and out["stats"]["disabled"]
+
+
+def test_token_manifest_distinct_sorted():
+    cells = [{"principal_id": "U21"}, {"principal_id": "U20"}, {"principal_id": "U21"}]
+    assert G.token_manifest(cells) == ["U20_token", "U21_token"]
+
+
+def test_build_project_matrix_orchestration(tmp_path, monkeypatch):
+    import src.agents.authz_discovery as D
+    import src.agents.authz_principals as P
+    monkeypatch.setattr(D, "_AUTHZ_DIR", tmp_path / "authz")
+    monkeypatch.setattr(D, "_PROFILE_DIR", tmp_path / "prof")
+    monkeypatch.setattr(P, "_PRINCIPALS_DIR", tmp_path / "princ")
+    # seed a tiny model + principals as config-layer data
+    model = {"project_id": "pid", "operation_count": 1, "operations": [
+        {"operationId": "listGroups", "method": "GET",
+         "path": "/v1/organizations/{orgId}/iam/groups", "scope": "ORG",
+         "permission": "iam.groups.read", "auth_gated": True, "success_status": 200}],
+        "role_permissions": {"iam-admin": ["iam.groups.read"]}}
+    D.persist_authz_model("pid", model)
+    P.persist_principals("pid", [
+        {"id": "U21", "login": "x", "principal_type": "customer", "home_org": "testorg",
+         "bindings": [{"role": "iam-admin", "scope": "org", "target": "testorg"}]}])
+    out = G.build_project_authz_matrix("pid", out_path=str(tmp_path / "m.json"))
+    assert out["built"] and out["stats"]["emitted"] == 1
+    assert out["token_manifest"] == ["U21_token"]
+    assert (tmp_path / "m.json").is_file()
+
+
+def test_build_project_matrix_fail_open_missing_inputs(tmp_path, monkeypatch):
+    import src.agents.authz_discovery as D
+    import src.agents.authz_principals as P
+    monkeypatch.setattr(D, "_AUTHZ_DIR", tmp_path / "a")
+    monkeypatch.setattr(P, "_PRINCIPALS_DIR", tmp_path / "p")
+    out = G.build_project_authz_matrix("no-such")
+    assert out["built"] is False and "route-catalog" in out["reason"]

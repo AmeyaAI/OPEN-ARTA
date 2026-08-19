@@ -132,6 +132,58 @@ def generate_newman_collection(cells: list[dict], *, collection_name: str = "aut
     return {"collection": collection, "stats": stats}
 
 
+def token_manifest(cells: list[dict], token_var_for=None) -> list[str]:
+    """The distinct per-principal token vars the emitted collection references —
+    exactly what the operator must seed in the project env (like
+    platform_operator_token) before the matrix can run. Sorted, deduped."""
+    token_var_for = token_var_for or _default_token_var
+    return sorted({token_var_for(c.get("principal_id") or "")
+                   for c in cells or [] if c.get("principal_id")})
+
+
+def build_project_authz_matrix(project_id: str, *, out_path: str | None = None,
+                               include_successful_mutations: bool = False) -> dict:
+    """Capstone orchestration: run the whole derived-RBAC pipeline for a project
+    and write a dispatchable Newman collection.
+
+    Loads the three config-layer inputs (route catalog, permission-catalog-
+    enriched authz model, principals) + profile, evaluates the oracle matrix,
+    generates the collection, writes it, and returns stats + the token manifest.
+    Fail-open: returns {built: False, reason} when an input is missing."""
+    if os.environ.get("ARTA_AUTHZ_MATRIX_GEN_DISABLE") == "1":
+        return {"built": False, "reason": "disabled"}
+    from pathlib import Path
+    from .authz_discovery import load_authz_model, load_authz_profile
+    from .authz_principals import load_principals
+    from .authz_oracle import evaluate_matrix
+
+    model = load_authz_model(project_id)
+    principals = load_principals(project_id)
+    if not model or not model.get("operations"):
+        return {"built": False, "reason": "no authz route-catalog model "
+                "(run build-authz-model first)"}
+    if not principals:
+        return {"built": False, "reason": "no principal fixtures "
+                "(.arta/authz_principals/<pid>.json)"}
+    profile = load_authz_profile(project_id)
+    cells = evaluate_matrix(model, principals, profile=profile)
+    out = generate_newman_collection(
+        cells, collection_name=f"authz-matrix-{project_id}",
+        include_successful_mutations=include_successful_mutations)
+    if not out.get("collection"):
+        return {"built": False, "reason": "generator disabled or no cells"}
+    path = Path(out_path or f".arta/authz_matrix/{project_id}.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(out["collection"], indent=2))
+    manifest = token_manifest(cells)
+    log.info("authz_matrix_gen: built %s (%d items, %d cells) -> %s; %d token vars to seed",
+             project_id, out["stats"]["emitted"], out["stats"]["total_cells"],
+             path, len(manifest))
+    return {"built": True, "path": str(path), "stats": out["stats"],
+            "token_manifest": manifest,
+            "mechanism": profile.get("authz_mechanism", "rbac_scoped_catalog")}
+
+
 if __name__ == "__main__":  # smoke check
     cells = [
         {"operationId": "listGroups", "method": "GET",

@@ -1496,6 +1496,26 @@ async def build_authz_model_endpoint(project_id: str, request: Request = None):
             "prompt_preview": summarize_authz_for_prompt(project_id, max_chars=600)}
 
 
+@app.post("/api/admin/build-authz-matrix",
+          dependencies=[Depends(_require_api_key)])
+async def build_authz_matrix_endpoint(project_id: str,
+                                      include_successful_mutations: bool = False):
+    """Capstone of the derived-RBAC pipeline: run the whole thing for a project
+    (route catalog -> permission catalog -> principals -> oracle -> Newman) and
+    write a dispatchable RBAC-matrix collection whose assertions are COMPUTED
+    from the SUT authz model, not LLM-guessed.
+
+    Prereqs (config-layer DATA): the authz model (POST build-authz-model), a
+    principal-fixtures file, and — for the run itself — the per-principal tokens
+    named in the returned `token_manifest`, seeded like any env variable.
+
+    `include_successful_mutations=true` also emits write cells expecting 2xx
+    (default off — R154 non-mutation; requires the destructive opt-in to run)."""
+    from ..agents.authz_matrix_gen import build_project_authz_matrix
+    return build_project_authz_matrix(
+        project_id, include_successful_mutations=include_successful_mutations)
+
+
 @app.post("/api/admin/regen-queue/backfill",
           dependencies=[Depends(_require_api_key)])
 async def regen_queue_backfill(limit: int | None = None):
