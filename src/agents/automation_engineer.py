@@ -12274,16 +12274,42 @@ Output: Complete .cy.ts file.
                                 n for n in (_agj.get("nodes") or [])
                                 if isinstance(n, dict) and n.get("kind") == "graphql_operation"]
                             if _gql_ops:
-                                _r330_newman_blocks += (
-                                    "\n[GRAPHQL OPERATIONS (introspected from the SUT)]\n"
-                                    "GraphQL endpoints take POST bodies of the form "
-                                    "{\"query\": \"...\"}. Use ONLY these introspected "
-                                    "operations — never invent one:\n"
-                                    + "\n".join(
-                                        f"  - {n.get('operation')}: {n.get('name')}"
-                                        for n in _gql_ops[:30]) + "\n")
-                                log.info("R330 P3: injected %d graphql op(s) into Newman "
-                                         "prompt for %s", min(len(_gql_ops), 30), req_id)
+                                # Prefer READ-side ops carrying a ready-to-send,
+                                # introspection-VALID query string (R154: queries
+                                # only, no mutations; ops needing a required arg
+                                # are omitted — no fabricated ids). Emit those
+                                # EXACT bodies; fall back to op names otherwise.
+                                _gql_ep = next((n.get("endpoint") for n in _gql_ops
+                                                if n.get("endpoint")), "the GraphQL endpoint")
+                                _gql_ready = [n for n in _gql_ops
+                                              if n.get("operation") == "query"
+                                              and n.get("query") and not n.get("requires_args")]
+                                if _gql_ready:
+                                    _lines = "\n".join(
+                                        f"  - POST {_gql_ep} body {{\"query\": {json.dumps(n['query'])}}}"
+                                        for n in _gql_ready[:30])
+                                    _r330_newman_blocks += (
+                                        "\n[GRAPHQL READ OPERATIONS (introspected from the SUT — "
+                                        "emit these EXACT requests, read-side only)]\n"
+                                        "A GraphQL call is POST " + _gql_ep + " with a JSON body "
+                                        "{\"query\": \"...\"}. Emit ONE request per line below, "
+                                        "using the query string verbatim — never invent an op or "
+                                        "a mutation:\n" + _lines + "\n")
+                                    log.info("R330 P3: injected %d VALID graphql read-query "
+                                             "body/-ies into Newman prompt for %s",
+                                             min(len(_gql_ready), 30), req_id)
+                                else:
+                                    _r330_newman_blocks += (
+                                        "\n[GRAPHQL OPERATIONS (introspected from the SUT)]\n"
+                                        "GraphQL endpoints take POST bodies of the form "
+                                        "{\"query\": \"...\"}. Use ONLY these introspected "
+                                        "operations — never invent one:\n"
+                                        + "\n".join(
+                                            f"  - {n.get('operation')}: {n.get('name')}"
+                                            for n in _gql_ops[:30]) + "\n")
+                                    log.info("R330 P3: injected %d graphql op name(s) into "
+                                             "Newman prompt for %s (no read-query bodies "
+                                             "available)", min(len(_gql_ops), 30), req_id)
                 except Exception as _gql_exc:
                     log.debug("R330 P3: graphql ops block skipped: %s", _gql_exc)
 

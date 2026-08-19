@@ -535,7 +535,8 @@ async def run(*, project: dict, project_id: str, neo4j_driver: Any = None,
                         "FAILED (%s) — reporting graphql_introspection_failed, NOT "
                         "'no non-REST'", gpath, gql.get("_error"))
                 else:
-                    pnodes = _proto.build_protocol_nodes(graphql=gql)
+                    pnodes = _proto.build_protocol_nodes(
+                        graphql=gql, graphql_endpoint=base_url.rstrip("/") + gpath)
                     if pnodes["nodes"]:
                         _api["nodes"].extend(pnodes["nodes"])
                         pcounts = _api.setdefault("protocol_counts", {})

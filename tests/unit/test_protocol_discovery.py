@@ -22,6 +22,79 @@ def test_parse_graphql_introspection():
     assert "Dataset" in s["types"] and "__Type" not in s["types"]
 
 
+# A realistic (invented) deep introspection: query root with a list-of-object
+# field, a required-arg field, and a scalar field; an object type with scalars +
+# a nested object; a mutation (must never be emitted as a read).
+_DEEP_SCHEMA = {"data": {"__schema": {
+    "queryType": {"name": "Query"},
+    "mutationType": {"name": "Mutation"},
+    "subscriptionType": None,
+    "types": [
+        {"name": "Query", "kind": "OBJECT", "fields": [
+            {"name": "products", "args": [],
+             "type": {"kind": "LIST", "name": None,
+                      "ofType": {"kind": "OBJECT", "name": "Product"}}},
+            {"name": "product", "args": [
+                {"name": "id", "type": {"kind": "NON_NULL", "name": None,
+                                        "ofType": {"kind": "SCALAR", "name": "ID"}}}],
+             "type": {"kind": "OBJECT", "name": "Product"}},
+            {"name": "health", "args": [], "type": {"kind": "SCALAR", "name": "String"}},
+        ]},
+        {"name": "Mutation", "kind": "OBJECT", "fields": [
+            {"name": "addProduct", "args": [], "type": {"kind": "OBJECT", "name": "Product"}}]},
+        {"name": "Product", "kind": "OBJECT", "fields": [
+            {"name": "id", "type": {"kind": "SCALAR", "name": "ID"}},
+            {"name": "name", "type": {"kind": "SCALAR", "name": "String"}},
+            {"name": "supplier", "type": {"kind": "OBJECT", "name": "Supplier"}}]},
+        {"name": "Supplier", "kind": "OBJECT", "fields": [
+            {"name": "id", "type": {"kind": "SCALAR", "name": "ID"}}]},
+    ]}}}
+
+
+def test_gql_unwrap_type():
+    assert pd._gql_unwrap_type({"kind": "SCALAR", "name": "ID"}) == ("SCALAR", "ID")
+    # NON_NULL(LIST(OBJECT Product)) → the innermost named type
+    assert pd._gql_unwrap_type({"kind": "NON_NULL", "name": None, "ofType": {
+        "kind": "LIST", "name": None, "ofType": {"kind": "OBJECT", "name": "Product"}}}) \
+        == ("OBJECT", "Product")
+
+
+def test_parse_graphql_read_operations():
+    s = pd.parse_graphql_introspection(_DEEP_SCHEMA)
+    by = {o["name"]: o for o in s["read_operations"]}
+    assert set(by) == {"products", "product", "health"}          # query root only
+    # list-of-object → selection of the object's scalar fields (supplier omitted)
+    assert by["products"]["query"] == "query { products { id name } }"
+    assert by["products"]["requires_args"] is False
+    # required (NON_NULL) arg flagged
+    assert by["product"]["requires_args"] is True
+    # scalar return → leaf query, no selection set
+    assert by["health"]["query"] == "query { health }"
+
+
+def test_build_graphql_read_items_skips_required_and_mutations():
+    s = pd.parse_graphql_introspection(_DEEP_SCHEMA)
+    items = pd.build_graphql_read_items(s["read_operations"], "http://sut/graphql")
+    names = {i["name"] for i in items}
+    assert names == {"GraphQL query products", "GraphQL query health"}  # not product (req arg)
+    assert all(i["request"]["method"] == "POST" for i in items)
+    body = next(i for i in items if "products" in i["name"])["request"]["body"]["raw"]
+    assert '"query": "query { products { id name } }"' in body
+    # mutation addProduct is never emitted as a read
+    assert not any("addProduct" in n for n in names)
+    assert pd.build_graphql_read_items([], "http://x") == []
+
+
+def test_build_protocol_nodes_enriches_query_nodes():
+    s = pd.parse_graphql_introspection(_DEEP_SCHEMA)
+    g = pd.build_protocol_nodes(graphql=s, graphql_endpoint="http://sut/graphql")
+    qn = {n["name"]: n for n in g["nodes"] if n.get("kind") == "graphql_operation"}
+    assert qn["products"]["query"] == "query { products { id name } }"
+    assert qn["products"]["endpoint"] == "http://sut/graphql"
+    assert qn["product"]["requires_args"] is True
+    assert qn["addProduct"].get("query") is None      # mutation carries no read query
+
+
 def test_parse_proto():
     proto = """
     syntax = "proto3";
