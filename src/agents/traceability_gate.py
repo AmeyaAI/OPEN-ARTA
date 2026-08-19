@@ -204,11 +204,18 @@ def build_requirement_endpoint_map(
     """
     real: list[dict] = []
     seen: set = set()
+    _src_files: dict = {}   # (m,p) → SUT source file backing the route (Code→API identity)
     for e in (captured_endpoints or []):
         p = _norm_path((e or {}).get("path", ""))
         if not p or p == "/":
             continue
         key = (str((e or {}).get("method") or "GET").upper(), p)
+        # Source-derived backend routes (source="github", persisted into the
+        # captured store by discovery_executor Fix-2/P8) carry the handler `file`
+        # — the real Code→API identity. Record it even if the (m,p) was already
+        # seen from a runtime capture (runtime rows lack the file).
+        if (e or {}).get("file"):
+            _src_files.setdefault(key, e["file"])
         if key in seen:
             continue
         seen.add(key)
@@ -230,12 +237,15 @@ def build_requirement_endpoint_map(
     _src_keys: set = set()
     for t in (source_endpoints or []):
         if isinstance(t, str):
-            p, m = _norm_path(t), "GET"
+            p, m, _f = _norm_path(t), "GET", None
         else:
             p, m = _norm_path((t or {}).get("path") or ""), str((t or {}).get("method") or "GET").upper()
+            _f = (t or {}).get("file") or None
         if not p or p == "/":
             continue
         _src_keys.add((m, p))
+        if _f:
+            _src_files[(m, p)] = _f
         if (m, p) in seen:
             continue
         seen.add((m, p))
@@ -249,7 +259,8 @@ def build_requirement_endpoint_map(
         score = sum(1 for tok in ptoks if any(tok in k or k in tok for k in kws))
         if score >= min_score:
             mapped.append({**e, "score": score,
-                           "source_verified": (e["method"], e["path"]) in _src_keys})
+                           "source_verified": (e["method"], e["path"]) in _src_keys,
+                           "source_file": _src_files.get((e["method"], e["path"]))})
     mapped.sort(key=lambda x: (-x["score"], x["path"]))
     if not mapped:
         return {"endpoints": [], "ungroundable": True, "reason": "no_keyword_match"}
@@ -437,6 +448,28 @@ def authz_stamp(matched_endpoint_keys, authz_model: dict | None) -> dict:
     return {"gated_endpoints": gated, "gated_count": len(gated)}
 
 
+# ── Source-Code-Component stamp — the Code→API link of a test's traceability ──
+
+def source_component_stamp(matched_endpoint_keys, mapped_endpoints: list | None) -> dict:
+    """The backend Source-Code-Component dimension of a test's traceability:
+    which SUT source file backs each endpoint the test exercises (real handler
+    identity, not merely `source_verified=True`). Completes the Req→Code→API→Test
+    spine.
+
+    `matched_endpoint_keys` are `METHOD:/template` (from assess_traceability);
+    `mapped_endpoints` carry `source_file` (threaded from Architecture-Discovery
+    backend-route extraction via build_requirement_endpoint_map). Returns
+    {components:[{key,file}], component_count}. Empty when no source_file match —
+    the caller stamps only when component_count>0. Deterministic; no LLM."""
+    if not matched_endpoint_keys or not mapped_endpoints:
+        return {"components": [], "component_count": 0}
+    by_key = {f"{(m.get('method') or 'GET').upper()}:{m.get('path')}": m.get("source_file")
+              for m in mapped_endpoints
+              if isinstance(m, dict) and m.get("source_file")}
+    comps = [{"key": k, "file": by_key[k]} for k in matched_endpoint_keys if k in by_key]
+    return {"components": comps, "component_count": len(comps)}
+
+
 # ── R330 P1d — per-test grounding provenance (extracted from the tests.py gate
 # so it is unit-testable and evidence-preserving) ────────────────────────────
 
@@ -535,6 +568,10 @@ def read_traceability(project_id: str) -> dict:
     # usually ALSO flagged untraceable — summing the two double-counted.
     needs_attention = sum(1 for r in rows
                           if not r.get("traceable") or r.get("grounded_by") == "guess")
+    # Code→API spine completeness: tests whose exercised endpoints resolve to a
+    # real SUT source file (source_component_stamp), not just source_verified.
+    source_component_count = sum(
+        1 for r in rows if (r.get("source_components") or {}).get("component_count"))
     return {
         "project_id": project_id,
         "test_count": n,
@@ -545,4 +582,5 @@ def read_traceability(project_id: str) -> dict:
         "grounded_by": dict(grounded_by),
         "source_grounding": dict(src_status),
         "needs_attention_count": needs_attention,
+        "source_component_count": source_component_count,
     }

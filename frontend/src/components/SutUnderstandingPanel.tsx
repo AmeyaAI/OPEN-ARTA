@@ -124,6 +124,11 @@ export default function SutUnderstandingPanel({ projectId }: { projectId: string
         <div className="mb-3">
           <div className="text-[11px] mb-1" style={{ color: '#94a3b8' }}>
             {t.test_count} generated tests · {flagged} potentially incorrect · traceability {t.traceability_pct ?? '—'}%
+            {(t.source_component_count ?? 0) > 0 && (
+              <span title="Tests whose exercised endpoints resolve to a real SUT source file (Req→Code→API→Test spine)">
+                {' · '}<span style={{ color: '#10b981' }}>🔗 {t.source_component_count} Code→API grounded</span>
+              </span>
+            )}
           </div>
           <Bar dist={t.grounded_by || {}} />
         </div>
