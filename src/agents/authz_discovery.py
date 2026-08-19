@@ -324,6 +324,21 @@ def build_authz_model(project_id: str, openapi_doc: dict | None = None) -> dict 
     if not model["operations"]:
         return None
     model["project_id"] = project_id
+    # Step 2 — permission catalog (role->permission bindings): if the SUT's
+    # catalog is available in the config layer, promote heuristic op-permissions
+    # to catalog-confirmed + attach role bindings for the oracle. Fail-open: no
+    # catalog => the model stays route-catalog-only (heuristic permissions).
+    try:
+        from .authz_catalog import (load_permission_catalog,
+                                    apply_permission_catalog,
+                                    extract_permissions_from_openapi)
+        catalog = load_permission_catalog(project_id)
+        if catalog:
+            op_perms = extract_permissions_from_openapi(
+                doc, profile.get("permission_extension", "x-permission"))
+            apply_permission_catalog(model, catalog, op_perms)
+    except Exception as _cat_exc:
+        log.debug("authz_catalog: apply skipped for %s: %s", project_id, _cat_exc)
     persist_authz_model(project_id, model)
     s = model["summary"]
     log.info("authz_discovery: %s -> %d ops (%d authz-gated, %d exempt) "
