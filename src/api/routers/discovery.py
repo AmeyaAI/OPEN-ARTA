@@ -450,6 +450,8 @@ async def grounding_coverage(project_id: str) -> dict:
             "source_grounding": rt.get("source_grounding", {}),
             "needs_attention_count": rt.get("needs_attention_count",
                                             rt.get("potentially_incorrect_count", 0)),
+            # Code→API spine: tests whose endpoints resolve to a real SUT source file.
+            "source_component_count": rt.get("source_component_count", 0),
         }
     except Exception as exc:
         log.debug("grounding_coverage tests block skipped: %s", exc)

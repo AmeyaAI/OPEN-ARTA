@@ -5605,7 +5605,9 @@ async def generate_tests(body: GenerateRequest, request: Request):
             # dict (not just `source`) so evidence-only endpoints (source_har/
             # discovered_at) rank as observed; derivation extracted to
             # traceability_gate.derive_grounded_by (unit-testable).
-            from ...agents.traceability_gate import derive_grounded_by, prune_traceability
+            from ...agents.traceability_gate import (
+                derive_grounded_by, prune_traceability,
+                source_component_stamp as _sc_stamp)
             _cap_by_key = {
                 f"{e.get('method')}:{e.get('path')}": e
                 for e in (_captured or []) if isinstance(e, dict) and e.get('path')
@@ -5674,6 +5676,14 @@ async def generate_tests(body: GenerateRequest, request: Request):
                             log.info("P2: test %s exercises %d authz-gated endpoint(s) "
                                      "with no authz grounding (grounded_by=%s)",
                                      _tid, _az["gated_count"], _gb)
+                # Source-Code-Component dimension: the SUT source file(s) backing
+                # the endpoints this test exercises (real Code→API handler
+                # identity, not just source_verified). Completes Req→Code→API→Test.
+                if os.environ.get("ARTA_TRACEABILITY_SOURCE_COMPONENT_DISABLE") != "1":
+                    _sc = _sc_stamp(_mk, _mapped)
+                    if _sc["component_count"]:
+                        _res["source_components"] = _sc
+                        _t["metadata"]["source_components"] = _sc
                 if _code_api_links:
                     _t["metadata"]["code_api_links"] = _code_api_links
                 if not _res["traceable"]:
@@ -5724,6 +5734,8 @@ async def generate_tests(body: GenerateRequest, request: Request):
                             _patch["authz"] = _md["authz"]
                         if _md.get("authz_ungrounded"):
                             _patch["authz_ungrounded"] = True
+                        if _md.get("source_components"):
+                            _patch["source_components"] = _md["source_components"]
                         await _s_r330.execute(_sqltext_r330(
                             "UPDATE test_cases SET metadata = COALESCE(metadata,'{}'::jsonb) "
                             "|| CAST(:patch AS jsonb), updated_at = NOW() "

@@ -1779,6 +1779,8 @@ export interface GroundingCoverage {
     source_grounding?: Record<string, number>
     // P1d — distinct guess ∪ flagged (the old guess+flagged sum double-counted)
     needs_attention_count?: number
+    // Code→API spine: tests whose endpoints resolve to a real SUT source file
+    source_component_count?: number
   }
   source_grounding_available?: boolean
   // P1d — component flags behind source_grounding_available
