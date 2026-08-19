@@ -4723,6 +4723,19 @@ async def _real_execution_inner(run_id: str, build_id: str, body: RunRequest, pr
             if t.get("project_id") == project_id
             and (t.get("automation_tool") or "").lower() == "k6"
         ]
+        # R298 parity for the k6 lane: honor the run's requirement scope.
+        # The validity scan below ran over the WHOLE project inventory, so a
+        # requirement-scoped run emitted BLOCKED rows for other requirements'
+        # k6 entries (live: 53 blocked rows in a 2-requirement scoped run,
+        # 0 in scope) — scoped runs must not carry out-of-scope noise.
+        _r298_k6_pref = [p for p in
+                         (test_env.get("ARTA_PROJECT_PREFIXES") or "").split(",") if p]
+        if _r298_k6_pref:
+            _all_k6 = [
+                t for t in _all_k6
+                if any(Path(t.get("script_path") or "").name.startswith(_p)
+                       for _p in _r298_k6_pref)
+            ]
         # R90.5 — dispatch-time content validity check. R71.4 trusted file
         # that trust is unsafe. R90.5 validates EACH file has either
         # `export default function` OR `options.scenarios` before adding
@@ -4730,26 +4743,65 @@ async def _real_execution_inner(run_id: str, build_id: str, body: RunRequest, pr
         # marker so R42.6 picks them up. Same regex pair as R90.1's
         # final-validator in automation_engineer._validate_k6_script.
         import re as _re_r90_5
-        def _r90_5_is_valid_k6(path_str: str) -> bool:
+        def _r90_5_k6_verdict(path_str: str) -> str:
+            """'ok' | 'missing' (file gone — stale inventory) | 'stub'."""
             try:
                 p = Path(path_str)
-                if not p.is_file():
-                    return False
+                if not path_str or not p.is_file():
+                    return "missing"
                 txt = p.read_text(errors="ignore")
                 if len(txt.strip()) < 20:
-                    return False
+                    return "stub"
                 has_fn = bool(_re_r90_5.search(r"export\s+default\s+function", txt))
                 has_sc = bool(_re_r90_5.search(r"\boptions\s*=.*scenarios\s*:", txt, _re_r90_5.DOTALL))
-                return has_fn or has_sc
+                return "ok" if (has_fn or has_sc) else "stub"
             except Exception:
-                return False
+                return "stub"
 
+        missing_k6_entries: list = []
         for entry in _all_k6:
-            sp = entry.get("script_path") or ""
-            if _r90_5_is_valid_k6(sp):
+            v = _r90_5_k6_verdict(entry.get("script_path") or "")
+            if v == "ok":
                 project_k6_entries.append(entry)
+            elif v == "missing":
+                missing_k6_entries.append(entry)
             else:
                 invalid_k6_entries.append(entry)
+        # Stale-inventory self-heal: an entry whose file is GONE (purged /
+        # renamed artifacts) re-emitted a BLOCKED row on EVERY run forever,
+        # mislabeled "stub/truncated". Emit ONE truthful k6_script_missing row
+        # this run, then prune the entry so the sediment stops recurring —
+        # the next generate-all recreates inventory from real artifacts.
+        if missing_k6_entries:
+            _gone_ids = {id(e) for e in missing_k6_entries}
+            for ent in missing_k6_entries:
+                tid = ent.get("id") or ent.get("test_id") or "unknown"
+                _REAL_RESULTS.setdefault(run_id, []).append({
+                    "test_id": tid,
+                    "title": f"[NFR] k6 {tid} — script file missing (stale inventory entry pruned)",
+                    "status": "BLOCKED",
+                    "duration_ms": 0,
+                    "automation_tool": "k6",
+                    "error_message": (
+                        "k6 script file no longer exists on disk (purged or "
+                        "renamed artifact). Entry pruned from the inventory; "
+                        "regenerate the requirement to recreate it."
+                    ),
+                    "metadata": {
+                        "blocked_reason": "k6_script_missing",
+                        "remediation_cta": "regenerate_by_tool",
+                        "script_path": ent.get("script_path"),
+                    },
+                })
+            try:
+                GENERATED_TESTS[:] = [t for t in GENERATED_TESTS if id(t) not in _gone_ids]
+                from .tests import _save_tests_json as _r90_5_save
+                _r90_5_save()
+                log.warning(
+                    "R90.5: pruned %d stale k6 inventory entr(ies) with missing "
+                    "script files for run %s", len(missing_k6_entries), run_id)
+            except Exception as _prune_exc:
+                log.warning("R90.5: stale-entry prune failed: %s", _prune_exc)
     except Exception:
         project_k6_entries = []
         invalid_k6_entries = []
