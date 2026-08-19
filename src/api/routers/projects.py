@@ -486,6 +486,35 @@ def _save_projects() -> None:
                 "00000000-0000-0000-0000-000000000002",
                 "00000000-0000-0000-0000-000000000003"}
     user_projects = {k: v for k, v in _PROJECTS.items() if k not in demo_ids}
+    # Merge-preserve on write (same class as the auth-durability M1 fix): the
+    # whole-file rewrite means a PARTIAL in-memory entry — e.g. a project
+    # DB-hydrated without discovery_settings, then persisted by an UNRELATED
+    # project's variables PUT — silently clobbers the richer on-disk config
+    # (live: an env-var PUT on one project dropped another project's
+    # discovery_settings). Deep-merge the in-memory entries OVER what's on disk
+    # so on-disk keys absent in memory survive. In-memory values win on
+    # conflict; only whole-project existence follows _PROJECTS (a project no
+    # longer in memory is dropped — deletion is intentional). Killswitch
+    # ARTA_PROJECTS_MERGE_PRESERVE_DISABLE=1.
+    if os.environ.get("ARTA_PROJECTS_MERGE_PRESERVE_DISABLE") != "1":
+        try:
+            if _PROJECTS_FILE.exists():
+                on_disk = json.loads(_PROJECTS_FILE.read_text())
+                if isinstance(on_disk, dict):
+                    def _deep_fill(mem: dict, disk: dict) -> dict:
+                        for k, dv in disk.items():
+                            if k not in mem:
+                                mem[k] = dv  # on-disk-only key preserved
+                            elif isinstance(mem[k], dict) and isinstance(dv, dict):
+                                _deep_fill(mem[k], dv)
+                        return mem
+                    for pid, mem_proj in user_projects.items():
+                        disk_proj = on_disk.get(pid)
+                        if isinstance(mem_proj, dict) and isinstance(disk_proj, dict):
+                            _deep_fill(mem_proj, disk_proj)
+        except Exception as _mp_exc:
+            log.warning("_save_projects: merge-preserve read failed (%s) — "
+                        "writing in-memory state as-is", _mp_exc)
     _PROJECTS_FILE.parent.mkdir(parents=True, exist_ok=True)
     _PROJECTS_FILE.write_text(json.dumps(user_projects, indent=2, default=str))
     try:
