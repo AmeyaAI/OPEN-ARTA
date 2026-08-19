@@ -12569,6 +12569,22 @@ Output ONLY the JSON. No prose. Start with `{{` end with `}}`.
             for pat, repl in pats:
                 blob, c = _re_rw.subn(pat, repl, blob)
                 changed += c
+        # R305.I — the OTHER favourite LLM hallucination: a generic `items`
+        # pagination wrapper. When the SUT's real top-level array key is NOT
+        # `items`, ground `.to.have.property('items')` and `<bodyvar>.items`
+        # access onto the real key. These are NOT array-treatment idioms so the
+        # loop above misses them — this is the `expected {organizations:[…]} to
+        # have property 'items'` failure class (live run: expected {organizations:[…]} to have property items).
+        if list_key != "items":
+            blob, c = _re_rw.subn(
+                r"""(\.to\.have\.property\(\s*['"])items(['"])""",
+                rf"\1{list_key}\2", blob)
+            changed += c
+            for vf in forms:
+                v_disp = "pm.response.json()" if "pm" in vf else vf
+                ve = vf if "pm" in vf else _re_rw.escape(vf)
+                blob, c = _re_rw.subn(rf'\b{ve}\.items\b', f'{v_disp}.{list_key}', blob)
+                changed += c
         return (blob.split("\n") if changed else lines), changed
 
     def _r305_ground_body_array_assertions(self, parsed: dict, project_id: str | None) -> int:
