@@ -28,9 +28,15 @@ log = logging.getLogger("arta.protocol_discovery")
 
 # ── GraphQL ──────────────────────────────────────────────────────────────────
 
+# Deepened (was name-only) so gen can EMIT a valid query, not just name an op:
+# each field carries its return type + args (with NON_NULL/LIST unwrapping via
+# `ofType`, depth 4 — the common max NON_NULL(LIST(NON_NULL(Named)))).
+_GQL_TYPE_REF = ("type { kind name ofType { kind name ofType { kind name "
+                 "ofType { kind name } } } }")
 _GQL_INTROSPECTION_QUERY = (
-    "{ __schema { queryType { name } mutationType { name } "
-    "subscriptionType { name } types { name kind fields { name } } } }"
+    "{ __schema { queryType { name } mutationType { name } subscriptionType { name } "
+    "types { name kind fields { name args { name " + _GQL_TYPE_REF + " } "
+    + _GQL_TYPE_REF + " } } } }"
 )
 
 
@@ -76,10 +82,51 @@ def classify_protocol(path: str, content_type: str | None = None, summary: str =
     return "rest"
 
 
+def _gql_unwrap_type(type_ref: dict) -> tuple[str, str]:
+    """Unwrap a GraphQL typeRef (NON_NULL/LIST wrappers via `ofType`) to the
+    innermost NAMED type. Returns (kind, name), e.g. NON_NULL(LIST(Menu)) →
+    ("OBJECT", "Menu"). ("", "") when unresolvable."""
+    node = type_ref or {}
+    for _ in range(8):  # generous cap; real depth ≤4
+        if node.get("name"):
+            return node.get("kind") or "", node.get("name")
+        nxt = node.get("ofType")
+        if not isinstance(nxt, dict):
+            break
+        node = nxt
+    return node.get("kind") or "", node.get("name") or ""
+
+
+def _gql_selection_for(type_name: str, by_name: dict, *, k: int = 3) -> str:
+    """A minimal VALID selection set for an OBJECT/INTERFACE return type: up to
+    `k` of its SCALAR/ENUM field names (a leaf query needs no further nesting).
+    Falls back to `__typename` (always selectable) when it has no scalar field."""
+    t = by_name.get(type_name) or {}
+    scal: list[str] = []
+    for f in (t.get("fields") or []):
+        fk, _ = _gql_unwrap_type(f.get("type") or {})
+        if fk in ("SCALAR", "ENUM") and f.get("name"):
+            scal.append(f["name"])
+        if len(scal) >= k:
+            break
+    return " ".join(scal) if scal else "__typename"
+
+
+def _gql_build_query(field_name: str, selection: str) -> str:
+    """A syntactically-valid read query for one root field. Object returns get a
+    selection set; scalar/enum returns are leaves."""
+    return (f"query {{ {field_name} {{ {selection} }} }}" if selection
+            else f"query {{ {field_name} }}")
+
+
 def parse_graphql_introspection(data: dict) -> dict:
     """Extract operations + types from a GraphQL introspection result.
 
-    Accepts the raw `{"data": {"__schema": ...}}` or the inner `__schema`."""
+    Accepts the raw `{"data": {"__schema": ...}}` or the inner `__schema`.
+    Beyond the name-lists (back-compat), emits `read_operations`: per QUERY-root
+    field a ready-to-send, syntactically-valid `query` string + its args (with
+    `required`) — enough for gen to EMIT a real request, not just name an op.
+    READ-side only (query root; mutations excluded — R154 non-mutation)."""
     schema = (data or {}).get("data", {}).get("__schema") or (data or {}).get("__schema") or {}
     types = schema.get("types") or []
     by_name = {t.get("name"): t for t in types if isinstance(t, dict)}
@@ -89,13 +136,60 @@ def parse_graphql_introspection(data: dict) -> dict:
         t = by_name.get(root) or {}
         return sorted([f.get("name") for f in (t.get("fields") or []) if f.get("name")])
 
+    # read_operations — query-root fields with a valid emittable query string.
+    read_ops: list[dict] = []
+    qroot = (schema.get("queryType") or {}).get("name")
+    for f in ((by_name.get(qroot) or {}).get("fields") or []):
+        name = f.get("name")
+        if not name:
+            continue
+        args = [{"name": a.get("name"),
+                 "required": (a.get("type") or {}).get("kind") == "NON_NULL"}
+                for a in (f.get("args") or []) if a.get("name")]
+        rkind, rname = _gql_unwrap_type(f.get("type") or {})
+        selection = _gql_selection_for(rname, by_name) if rkind in ("OBJECT", "INTERFACE") else ""
+        read_ops.append({
+            "name": name, "args": args,
+            "requires_args": any(a["required"] for a in args),
+            "query": _gql_build_query(name, selection),
+        })
+
     return {
         "queries": _ops("queryType"),
         "mutations": _ops("mutationType"),
         "subscriptions": _ops("subscriptionType"),
         "types": sorted([n for n in by_name
                          if n and not n.startswith("__")])[:200],
+        "read_operations": sorted(read_ops, key=lambda o: o["name"]),
     }
+
+
+def build_graphql_read_items(read_operations: list[dict], graphql_url: str) -> list[dict]:
+    """Deterministic Postman v2.1 items for READ-side GraphQL ops — one POST
+    `{query}` per arg-free query field (ops with a REQUIRED arg are skipped:
+    fabricating an id would be a hallucinated value, and probing is read-only per
+    R154). No LLM. Each item asserts a non-5xx response with no GraphQL `errors`.
+    [] when there is nothing safely emittable."""
+    items: list[dict] = []
+    for op in (read_operations or []):
+        if op.get("requires_args") or not op.get("query"):
+            continue
+        items.append({
+            "name": f"GraphQL query {op['name']}",
+            "request": {
+                "method": "POST",
+                "header": [{"key": "Content-Type", "value": "application/json"}],
+                "url": {"raw": graphql_url},
+                "body": {"mode": "raw", "raw": json.dumps({"query": op["query"]})},
+            },
+            "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+                "pm.test('graphql ' + pm.response.code + ' (not 5xx, no errors)', function () {",
+                "  pm.expect(pm.response.code).to.be.below(500);",
+                "  var b = {}; try { b = pm.response.json(); } catch (e) {}",
+                "  pm.expect(b.errors, JSON.stringify(b.errors || [])).to.be.oneOf([undefined, null]);",
+                "});"]}}],
+        })
+    return items
 
 
 async def graphql_introspect(endpoint_url: str) -> dict:
@@ -304,18 +398,32 @@ def derive_auth_refresh_config(
 # ── graph surfacing ──────────────────────────────────────────────────────────
 
 def build_protocol_nodes(*, graphql: dict | None = None, proto: dict | None = None,
-                         event_channels: list[dict] | None = None) -> dict:
+                         event_channels: list[dict] | None = None,
+                         graphql_endpoint: str | None = None) -> dict:
     """Turn discovered non-REST schemas into Architecture Discovery nodes/edges
-    (merged into the api_graph by the run() aggregator)."""
+    (merged into the api_graph by the run() aggregator). GraphQL query nodes
+    carry the ready-to-emit `query` string + `endpoint` (from `read_operations`)
+    so gen produces a real request, not a name to guess around."""
     nodes: list[dict] = []
     edges: list[dict] = []
     counts: dict[str, int] = {}
 
     g = graphql or {}
+    # read_operations carry the emittable query + args; index by name to enrich
+    # the query nodes below (mutations/subscriptions have no read query).
+    _read_by_name = {o.get("name"): o for o in (g.get("read_operations") or [])
+                     if isinstance(o, dict) and o.get("name")}
     for op_kind in ("queries", "mutations", "subscriptions"):
         for name in g.get(op_kind, []):
-            nodes.append({"id": f"graphql:{op_kind[:-1]}:{name}", "kind": "graphql_operation",
-                          "operation": op_kind[:-1], "name": name})
+            node = {"id": f"graphql:{op_kind[:-1]}:{name}", "kind": "graphql_operation",
+                    "operation": op_kind[:-1], "name": name}
+            _ro = _read_by_name.get(name) if op_kind == "queries" else None
+            if _ro:
+                node["query"] = _ro.get("query")
+                node["requires_args"] = bool(_ro.get("requires_args"))
+            if graphql_endpoint:
+                node["endpoint"] = graphql_endpoint
+            nodes.append(node)
             counts["graphql"] = counts.get("graphql", 0) + 1
 
     for svc in (proto or {}).get("services", []):
