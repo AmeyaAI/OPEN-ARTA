@@ -1788,6 +1788,13 @@ export interface GroundingCoverage {
   source_grounding_available?: boolean
   // P1d — component flags behind source_grounding_available
   source_grounding?: { token_available?: boolean; repo_configured?: boolean }
+  // Protocol mix — the SUT's non-REST surface (durable per-endpoint tag + gRPC surface)
+  protocols?: {
+    by_protocol?: Record<string, number>
+    non_rest?: number
+    grpc_services?: number
+    grpc_methods?: number
+  }
   note?: string
   disabled?: boolean
 }

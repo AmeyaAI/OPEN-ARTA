@@ -119,6 +119,27 @@ export default function SutUnderstandingPanel({ projectId }: { projectId: string
         <Bar dist={cov.by_provenance || {}} />
       </div>
 
+      {/* Protocol mix — surface the non-REST surface ARTA understands (SSE/gRPC/GraphQL) */}
+      {((cov.protocols?.non_rest ?? 0) > 0 || (cov.protocols?.grpc_services ?? 0) > 0) && (
+        <div className="mb-4 text-xs p-2 rounded" style={{
+          background: 'rgba(56,189,248,0.08)', border: '1px solid rgba(56,189,248,0.3)', color: '#cbd5e1',
+        }}>
+          <span style={{ color: '#38bdf8' }}>◈ Protocols</span>{'  '}
+          {Object.entries(cov.protocols?.by_protocol || {})
+            .sort((a, b) => b[1] - a[1])
+            .map(([p, n]) => `${n} ${p.toUpperCase()}`).join(' · ')}
+          {(cov.protocols?.grpc_services ?? 0) > 0 && (
+            <span> · <span style={{ color: '#38bdf8' }}>
+              {cov.protocols!.grpc_services} gRPC service{cov.protocols!.grpc_services === 1 ? '' : 's'}
+              {(cov.protocols?.grpc_methods ?? 0) > 0 ? ` (${cov.protocols!.grpc_methods} rpc)` : ''}
+            </span></span>
+          )}
+          <div className="mt-0.5 text-[10px]" style={{ color: '#64748b' }}>
+            non-REST endpoints get their protocol-specific test lane (SSE stream / gRPC stub / GraphQL query)
+          </div>
+        </div>
+      )}
+
       {/* Per-test grounding */}
       {t.test_count ? (
         <div className="mb-3">
