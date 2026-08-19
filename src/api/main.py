@@ -1464,6 +1464,38 @@ async def regen_consumer_health():
         return {"alive": False, "error": str(exc)}
 
 
+@app.post("/api/admin/build-authz-model",
+          dependencies=[Depends(_require_api_key)])
+async def build_authz_model_endpoint(project_id: str, request: Request = None):
+    """Build the SUT authorization model (route-catalog half of the RBAC
+    oracle) from its OpenAPI contract — the first concrete step toward derived
+    (not LLM-guessed) RBAC test generation.
+
+    Reads the cached spec (`.arta/openapi/<pid>.json`). SUTs that do NOT serve
+    a machine-readable OpenAPI (e.g. k0rdent's SPA) may POST the spec body
+    directly: `{"openapi_doc": {...}}` — it is ingested without being cached.
+
+    Returns the per-operation catalog summary: scope / visibility / auth-gated /
+    exempt counts + domains. Fail-open (404-style message when no spec)."""
+    from ..agents.authz_discovery import build_authz_model, summarize_authz_for_prompt
+    doc = None
+    if request is not None:
+        try:
+            body = await request.json()
+            doc = (body or {}).get("openapi_doc")
+        except Exception:
+            doc = None
+    model = build_authz_model(project_id, openapi_doc=doc)
+    if not model:
+        return {"project_id": project_id, "built": False,
+                "reason": "no OpenAPI spec cached and none posted — "
+                          "POST {\"openapi_doc\": {...}} or run discovery first"}
+    return {"project_id": project_id, "built": True,
+            "operation_count": model["operation_count"],
+            "summary": model["summary"],
+            "prompt_preview": summarize_authz_for_prompt(project_id, max_chars=600)}
+
+
 @app.post("/api/admin/regen-queue/backfill",
           dependencies=[Depends(_require_api_key)])
 async def regen_queue_backfill(limit: int | None = None):

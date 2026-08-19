@@ -1716,6 +1716,18 @@ async def execute(ctx: Any, project: dict, environment: str | None = None) -> di
                     project_id, api_base_url,
                     len(_r67_b_spec.get("paths") or {}),
                 )
+                # Authz-model ingestion (route-catalog half of the RBAC oracle):
+                # derive scope/visibility/auth-gated/success per operation from
+                # the REAL fetched spec (persist_openapi_doc's merged doc carries
+                # stubs only — no responses/x-visibility). Fail-open. Feeds RBAC
+                # gen so it asserts against the real authz contract instead of
+                # LLM-guessing 'operator sees all'.
+                try:
+                    from .authz_discovery import build_authz_model
+                    build_authz_model(project_id, openapi_doc=_r67_b_spec)
+                except Exception as _az_exc:
+                    log.debug("authz_discovery: build skipped for %s: %s",
+                              project_id, _az_exc)
             else:
                 log.info(
                     "R67.B: OpenAPI cache fetch returned None for project=%s "
