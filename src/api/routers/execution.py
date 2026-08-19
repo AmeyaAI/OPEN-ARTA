@@ -4890,7 +4890,7 @@ async def _real_execution_inner(run_id: str, build_id: str, body: RunRequest, pr
             for js_path in k6_dir.glob("*.js"):
                 if not _prefix_re.match(js_path.name):
                     continue
-                if not _r90_5_is_valid_k6(str(js_path)):
+                if _r90_5_k6_verdict(str(js_path)) != "ok":
                     continue   # invalid content; R90.5 already handles
                 # Synthesize a minimal entry so the dispatch gate accepts
                 project_k6_entries.append({
