@@ -55,7 +55,10 @@ _MEASURABLE_RE = re.compile(
     r"|\bgreater\b|\bexceeds?\b|\bbelow\b|\babove\b"
     r"|%|\bpercent\b|\bms\b|\bseconds?\b|\bminutes?\b|\bhours?\b"
     r"|\bstatus\b|\bHTTP\b"
-    r"|\bequals?\b|\bmatches\b|\breturns?\b|\bcontains?\b|\brejected\b|\bissues?\b",
+    r"|\bequals?\b|\bmatches\b|\breturns?\b|\bcontains?\b|\brejected\b|\bissues?\b"
+    # Existence/visibility assertions are observable (DOM-absence checks like
+    # false-negatives).
+    r"|\bexists?\b|\bvisible\b|\brendered\b|\bdisplayed\b|\bpresent\b|\babsent\b|\bexactly\b",
     re.I,
 )
 
@@ -238,12 +241,33 @@ def validate_requirement_quality(requirement: dict) -> TestQualityResult:
                 ),
             ))
 
-    return _result(violations, metrics={
+    res = _result(violations, metrics={
         "req_id": req_id,
         "ac_count": n,
         "measurable_ac_count": measurable,
         "measurable_pct": round(100 * measurable / n, 1) if n else 0.0,
     })
+    # Rate-normalize the per-AC warning codes: the flat 8-points-per-violation
+    # sum let COUNT dominate — a 19-AC requirement with a few ambiguous words
+    # score 0 with 100% measurable ACs). Per-AC codes now contribute
+    # penalty × 3 × (violating/n) — a full-corpus violation costs the same as
+    # 3 flat hits, so small and large requirements band comparably.
+    # Requirement-level codes (RQ-001, RQ-002b) keep their flat penalty.
+    # Violations/flags/highlights stay complete — only the score is normalized.
+    if n:
+        _PER_AC_CODES = {"RQ-002", "RQ-003", "RQ-004", "RQ-005"}
+        score = 100.0
+        for code, entry in res.criteria_results.items():
+            if code.startswith("_") or not isinstance(entry, dict):
+                continue
+            pen = _SEVERITY_PENALTY.get(entry.get("severity"), 8)
+            cnt = entry.get("count", 0)
+            if code in _PER_AC_CODES:
+                score -= pen * 3 * min(1.0, cnt / n)
+            else:
+                score -= pen * cnt
+        res.score = max(0, min(100, round(score)))
+    return res
 
 
 # ── B2: Gherkin / scenario quality ───────────────────────────────────────────
@@ -408,12 +432,27 @@ def requirement_clarity_score(requirement: dict) -> dict:
     *when the requirement/AC is not clear, score it and highlight it.*"""
     res = validate_requirement_quality(requirement)
     score = res.score
+    m0 = res.criteria_results.get("_metrics", {})
     # An error-severity violation (e.g. no acceptance criteria) is the most
     # unclear a requirement can be → band 'unclear' regardless of raw score.
     if not res.passed:
         band = "unclear"
     else:
         band = "clear" if score >= 80 else "weak" if score >= 50 else "unclear"
+        # Measurability guard: the band is anchored to the #1 quality lever —
+        # rate-normalized scoring alone would band a requirement 'clear' with
+        # half its ACs unmeasurable. Below the RQ-002b floor (default 50%) the
+        # band caps at 'weak'; below 20% it is 'unclear'.
+        _mp = m0.get("measurable_pct")
+        if isinstance(_mp, (int, float)):
+            try:
+                _floor = float(os.environ.get("ARTA_MIN_MEASURABLE_AC_PCT", "50") or "50")
+            except (TypeError, ValueError):
+                _floor = 50.0
+            if _mp < 20:
+                band = "unclear"
+            elif _mp < _floor and band == "clear":
+                band = "weak"
     m = res.criteria_results.get("_metrics", {})
     return {
         "req_id": (requirement.get("req_id") or requirement.get("id")),

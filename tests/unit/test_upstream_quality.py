@@ -309,3 +309,48 @@ def test_r205_enrich_skips_ac_with_measurable_then(monkeypatch):
     assert "Verifiable" not in out["acceptance_criteria"][0]["statement"]
     assert "Verifiable" in out["acceptance_criteria"][1]["statement"]
     assert out.get("_r205_acs_enriched") == 1
+
+
+def test_score_rate_normalized_not_count_dominated():
+    # A large requirement with a LOW violation RATE must outscore a small one
+    big = {"req_id": "R-BIG", "acceptance_criteria": [
+        {"id": f"A{i}", "statement": f"item {i}", "then": "returns HTTP 200 with field x"}
+        for i in range(16)
+    ] + [{"id": "A-bad", "statement": "works correctly"}] * 3}
+    small = {"req_id": "R-SMALL", "acceptance_criteria": [
+        {"id": "B1", "statement": "works correctly"},
+        {"id": "B2", "statement": "behaves properly"},
+    ]}
+    big_score = validate_requirement_quality(big).score
+    small_score = validate_requirement_quality(small).score
+    assert big_score > small_score
+    assert big_score >= 70  # 3/19 bad ACs must not tank the band
+
+
+def test_band_capped_by_measurability_guard():
+    from src.agents.upstream_quality import requirement_clarity_score
+    # 1 of 6 measurable (17%) → unclear regardless of normalized score.
+    low = {"req_id": "R-LOW", "acceptance_criteria": [
+        {"id": "A0", "statement": "ok", "then": "returns HTTP 200"},
+    ] + [{"id": f"A{i}", "statement": f"handles case {chr(97+i)} smoothly"} for i in range(1, 6)]}
+    assert requirement_clarity_score(low)["band"] == "unclear"
+    # 2 of 5 measurable (40%, below the 50% floor) → capped below clear.
+    mid = {"req_id": "R-MID", "acceptance_criteria": [
+        {"id": "B0", "statement": "ok", "then": "returns HTTP 200"},
+        {"id": "B1", "statement": "ok2", "then": "body contains a token field"},
+    ] + [{"id": f"B{i}", "statement": f"supports scenario {chr(97+i)}"} for i in range(2, 5)]}
+    assert requirement_clarity_score(mid)["band"] in ("weak", "unclear")
+    # Fully measurable stays clear.
+    hi = {"req_id": "R-HI", "acceptance_criteria": [
+        {"id": f"C{i}", "statement": f"case {i}", "then": "returns HTTP 200 with field x"}
+        for i in range(6)]}
+    assert requirement_clarity_score(hi)["band"] == "clear"
+
+
+def test_existence_assertions_are_measurable():
+    req = {"req_id": "R-DOM", "acceptance_criteria": [
+        {"id": "D1", "statement": "removed chart", "then": "No time-series element exists in the DOM"},
+        {"id": "D2", "statement": "section gone", "then": "the legacy section is absent from the page"},
+    ]}
+    res = validate_requirement_quality(req)
+    assert "RQ-002" not in _codes(res)
