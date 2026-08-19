@@ -9,7 +9,7 @@ mirroring the manual matrix's 27 archetype columns (U1-U25 + cross-tenant X1/X2)
 A principal archetype (canonical schema):
 
     {"id": "U20", "label": "org-viewer @ org=testorg",
-     "login": "user1@testorg.example",          # credential ref (email / token var)
+     "login": "u20-login-ref",          # credential ref (email or token var)
      "principal_type": "customer",              # operator | customer | service_account
      "home_org": "testorg",
      "bindings": [{"role": "organizations-viewer", "scope": "org",
@@ -133,10 +133,10 @@ if __name__ == "__main__":  # smoke check
         "organizations-viewer": ["org.members.read", "org.projects.read"],
         "iam-admin": ["iam.groups.read", "iam.groups.create"]}}
     _principals = [
-        {"id": "U20", "label": "org-viewer @ org=testorg", "login": "user1@testorg.example",
+        {"id": "U20", "label": "org-viewer @ org=testorg", "login": "u20-login-ref",
          "principal_type": "customer", "home_org": "testorg",
          "bindings": [{"role": "organizations-viewer", "scope": "org", "target": "testorg"}]},
-        {"id": "U3", "label": "iam-admin @ platform", "login": "iam-admin1@vendor.example",
+        {"id": "U3", "label": "iam-admin @ platform", "login": "u3-login-ref",
          "principal_type": "operator", "home_org": "vendor",
          "bindings": [{"role": "iam-admin", "scope": "platform", "target": ""}]},
         {"id": "BAD", "login": "", "principal_type": "customer",
