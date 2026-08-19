@@ -34,15 +34,15 @@ def test_r115_i_2_disk_scan_branch_present():
 
 
 def test_r115_i_2_validates_content_before_adding():
-    """Source check: R115.I.2 reuses _r90_5_is_valid_k6 to skip stub files."""
+    """Source check: R115.I.2 reuses the R90.5 verdict helper to skip stub files."""
     content = _EXECUTION_PY.read_text()
     # Find the R115.I.2 block specifically
     r115_block_start = content.find("R115.I.2 — disk-scan fallback")
     assert r115_block_start > 0, "R115.I.2 block not found"
-    # Within the block, _r90_5_is_valid_k6 must be called
+    # Within the block, _r90_5_k6_verdict must be called
     block_window = content[r115_block_start:r115_block_start + 2500]
-    assert "_r90_5_is_valid_k6" in block_window, (
-        "R115.I.2: should call _r90_5_is_valid_k6 before adding to inventory"
+    assert "_r90_5_k6_verdict" in block_window, (
+        "R115.I.2: should call _r90_5_k6_verdict before adding to inventory"
     )
 
 
