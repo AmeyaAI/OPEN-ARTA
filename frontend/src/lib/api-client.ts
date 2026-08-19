@@ -1791,6 +1791,30 @@ export async function fetchGroundingCoverage(projectId: string) {
   return request<GroundingCoverage>(`/api/discovery/projects/${projectId}/grounding-coverage`)
 }
 
+// SUT-Understanding — derived AUTHORIZATION model summary. Mirrors the backend
+// /api/discovery/projects/{id}/authz-model response (discovery.py). All fields
+// optional so the panel renders defensively when a field is absent/degraded.
+export interface AuthzModel {
+  project_id: string
+  built?: boolean
+  disabled?: boolean
+  operation_count?: number
+  summary?: {
+    by_scope?: Record<string, number>
+    authz_gated?: number
+    exempt_auth_only?: number
+    domains?: string[]
+  }
+  role_count?: number
+  principal_count?: number
+  principal_by_type?: Record<string, number>
+  mechanism?: string
+}
+
+export async function fetchAuthzModel(projectId: string) {
+  return request<AuthzModel>(`/api/discovery/projects/${projectId}/authz-model`)
+}
+
 // R330 P4 — one Architecture Discovery graph artifact (reuses the pre-existing
 // fetchArchitectureSummary/ArchitectureSummary above for the graph list).
 export interface RawGraphNode {

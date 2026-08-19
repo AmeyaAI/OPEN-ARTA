@@ -348,18 +348,32 @@ def build_authz_model(project_id: str, openapi_doc: dict | None = None) -> dict 
     return model
 
 
-def summarize_authz_for_prompt(project_id: str, *, max_chars: int = 2000) -> str:
-    """Compact authz catalog for later RBAC gen grounding. Empty when no model.
+def summarize_authz_for_prompt(project_id: str, *, max_chars: int = 2000,
+                               relevant_paths: "set | list | None" = None) -> str:
+    """Compact authz catalog for RBAC gen grounding. Empty when no model.
     Lists authz-gated operations with scope + derived permission so the
     generator asserts against the REAL scope/permission rather than inventing
     'operator sees all'. The exempt set is called out so gen never treats an
-    exempt 200 as an RBAC privilege."""
+    exempt 200 as an RBAC privilege.
+
+    `relevant_paths` (path strings this requirement exercises): when provided,
+    RANKS the gated ops whose path is relevant FIRST so `max_chars` truncation
+    can never drop the op the caller cares about (a correctness concern on large
+    SUTs, not just bloat). Unmatched ops still follow, space permitting."""
     model = load_authz_model(project_id)
     if not model:
         return ""
     ops = model["operations"]
     gated = [o for o in ops if o["auth_gated"]]
     exempt = [o for o in ops if o["auth_required"] and not o["auth_gated"]]
+    if relevant_paths:
+        _rel = {str(p) for p in relevant_paths}
+        # relevant-first ordering (stable); a path is relevant if any hint is a
+        # substring of the op path or vice-versa (template vs concrete tolerance).
+        def _is_rel(o):
+            p = o.get("path") or ""
+            return any(r in p or p in r for r in _rel)
+        gated = sorted(gated, key=lambda o: 0 if _is_rel(o) else 1)
     lines = [
         "# SUT AUTHORIZATION MODEL (derived from OpenAPI — route catalog)",
         f"# {len(gated)} authz-gated ops, {len(exempt)} exempt (auth-only, "

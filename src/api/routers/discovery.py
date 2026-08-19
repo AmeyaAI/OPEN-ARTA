@@ -506,6 +506,36 @@ async def grounding_coverage(project_id: str) -> dict:
     }
 
 
+@router.get("/projects/{project_id}/authz-model")
+async def authz_model(project_id: str) -> dict:
+    """SUT-Understanding — the derived AUTHORIZATION model summary (route catalog
+    + permission catalog + principals + mechanism). Read-only; composes the
+    already-persisted config-layer artifacts. Fail-open: `{built:false}` when no
+    route-catalog model exists yet; `principal_count:0` when principals aren't
+    seeded. Killswitch ARTA_AUTHZ_MODEL_ENDPOINT_DISABLE."""
+    if os.environ.get("ARTA_AUTHZ_MODEL_ENDPOINT_DISABLE") == "1":
+        return {"project_id": project_id, "disabled": True}
+    from ...agents.authz_discovery import load_authz_model, load_authz_profile
+    from ...agents.authz_catalog import load_permission_catalog
+    from ...agents.authz_principals import summarize_principals
+    model = load_authz_model(project_id)
+    if not model or not model.get("operations"):
+        return {"project_id": project_id, "built": False}
+    profile = load_authz_profile(project_id)
+    catalog = load_permission_catalog(project_id) or {}
+    princ = summarize_principals(project_id, catalog)
+    return {
+        "project_id": project_id,
+        "built": True,
+        "operation_count": model.get("operation_count", 0),
+        "summary": model.get("summary", {}),
+        "role_count": len((catalog or {}).get("role_permissions") or {}),
+        "principal_count": princ.get("principal_count", 0),
+        "principal_by_type": princ.get("by_type", {}),
+        "mechanism": (profile or {}).get("authz_mechanism", "rbac_scoped_catalog"),
+    }
+
+
 @router.get("/projects/{project_id}/chains")
 async def list_chains(project_id: str, limit: int = 50) -> dict:
     """Phase C/H1: list captured chains for the Chain View DAG.

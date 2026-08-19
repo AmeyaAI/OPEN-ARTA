@@ -682,8 +682,15 @@ async def list_tests(
             return bool(meta.get("potentially_incorrect"))
         if flag == "guess":
             return meta.get("grounded_by") == "guess"
+        if flag == "authz_ungrounded":
+            return bool(meta.get("authz_ungrounded"))
         if flag == "needs_attention":
-            return bool(meta.get("potentially_incorrect")) or meta.get("grounded_by") == "guess"
+            # P2.3 — an authz-ungrounded test (exercises a gated endpoint with no
+            # authz grounding) is an understanding gap; surface it in the same
+            # triage lane as potentially_incorrect/guess.
+            return (bool(meta.get("potentially_incorrect"))
+                    or meta.get("grounded_by") == "guess"
+                    or bool(meta.get("authz_ungrounded")))
         return True  # unknown flag value — no filtering (fail-open for listing)
 
     async with try_db() as db:
@@ -5603,6 +5610,16 @@ async def generate_tests(body: GenerateRequest, request: Request):
                 f"{e.get('method')}:{e.get('path')}": e
                 for e in (_captured or []) if isinstance(e, dict) and e.get('path')
             }
+            # P2 — load the derived authz route catalog ONCE so each test can be
+            # stamped with the authorization dimension of its traceability.
+            _authz_model = None
+            if _pid and os.environ.get("ARTA_TRACEABILITY_AUTHZ_DISABLE") != "1":
+                try:
+                    from ...agents.authz_discovery import load_authz_model as _az_load
+                    from ...agents.traceability_gate import authz_stamp as _az_stamp
+                    _authz_model = _az_load(_pid)
+                except Exception as _az_load_exc:
+                    log.debug("P2 authz stamp: model load skipped: %s", _az_load_exc)
             # R330 P1d — the gen-time source-grounding status (fail-loud): stamp it
             # per test so it persists with the gate verdicts and reaches the panel.
             _src_grounding = (getattr(auto_agent, "_r330_source_grounding_status", None)
@@ -5642,6 +5659,21 @@ async def generate_tests(body: GenerateRequest, request: Request):
                 if _src_grounding:
                     _res["source_grounding"] = _src_grounding
                     _t["metadata"]["source_grounding"] = _src_grounding
+                # P2 — authorization dimension of the trace: stamp the gated
+                # endpoints this test exercises with their permission/scope/
+                # expected-status; fail-LOUD when a gated endpoint is hit by a
+                # test with no authz grounding (guess-grounded / no source).
+                if _authz_model:
+                    _az = _az_stamp(_mk, _authz_model)
+                    if _az["gated_count"]:
+                        _res["authz"] = _az
+                        _t["metadata"]["authz"] = _az
+                        if _gb == "guess" or not _src_grounding:
+                            _res["authz_ungrounded"] = True
+                            _t["metadata"]["authz_ungrounded"] = True
+                            log.info("P2: test %s exercises %d authz-gated endpoint(s) "
+                                     "with no authz grounding (grounded_by=%s)",
+                                     _tid, _az["gated_count"], _gb)
                 if _code_api_links:
                     _t["metadata"]["code_api_links"] = _code_api_links
                 if not _res["traceable"]:
@@ -5688,6 +5720,10 @@ async def generate_tests(body: GenerateRequest, request: Request):
                             _patch["potentially_incorrect"] = True
                         if _md.get("source_grounding"):
                             _patch["source_grounding"] = _md["source_grounding"]
+                        if _md.get("authz"):
+                            _patch["authz"] = _md["authz"]
+                        if _md.get("authz_ungrounded"):
+                            _patch["authz_ungrounded"] = True
                         await _s_r330.execute(_sqltext_r330(
                             "UPDATE test_cases SET metadata = COALESCE(metadata,'{}'::jsonb) "
                             "|| CAST(:patch AS jsonb), updated_at = NOW() "

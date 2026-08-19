@@ -410,6 +410,33 @@ def assess_traceability(test_paths: set[str], impl_paths: set[str] | None = None
     }
 
 
+# ── P2 — authorization-dimension stamp for the traceability spine ─────────────
+
+def authz_stamp(matched_endpoint_keys, authz_model: dict | None) -> dict:
+    """The authorization dimension of a test's traceability: which of the
+    endpoints it actually exercises are authz-gated, with each op's
+    permission/scope/visibility/expected-status from the derived route catalog.
+
+    `matched_endpoint_keys` are `METHOD:/template` (from assess_traceability);
+    the authz model's ops key identically (both OpenAPI-derived). Returns
+    {gated_endpoints:[{key,permission,scope,visibility,expected_status}],
+    gated_count}. Empty when no model / no gated match — the caller stamps only
+    when gated_count>0. Deterministic; no LLM."""
+    ops = (authz_model or {}).get("operations") or []
+    if not ops or not matched_endpoint_keys:
+        return {"gated_endpoints": [], "gated_count": 0}
+    by_key = {f"{(o.get('method') or 'GET').upper()}:{o.get('path')}": o
+              for o in ops if o.get("auth_gated")}
+    gated = []
+    for k in matched_endpoint_keys:
+        op = by_key.get(k)
+        if op:
+            gated.append({"key": k, "permission": op.get("permission_guess"),
+                          "scope": op.get("scope"), "visibility": op.get("visibility"),
+                          "expected_status": op.get("success_status")})
+    return {"gated_endpoints": gated, "gated_count": len(gated)}
+
+
 # ── R330 P1d — per-test grounding provenance (extracted from the tests.py gate
 # so it is unit-testable and evidence-preserving) ────────────────────────────
 

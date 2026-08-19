@@ -3931,6 +3931,12 @@ class AutomationEngineerAgent:
                     _bk_r243_project, project_id or "")
                 if _bk_auth_blk:
                     prompt += _bk_auth_blk
+                # P1 — derived SUT AUTHORIZATION contract (batch PW path parity).
+                _bk_az_blk = self._authz_grounding_block(
+                    project_id or "", combined_gherkin,
+                    self._r126_a_is_ollama_provider(self._client))
+                if _bk_az_blk:
+                    prompt += "\n\n" + _bk_az_blk
             except Exception as _bk_r243_exc:
                 log.debug("R243: batch login-contract injection skipped for %s: %s",
                           req_id, _bk_r243_exc)
@@ -7098,6 +7104,14 @@ test.describe('{req_id} — ARTA-generated', () => {{
             (risk.get("project_id") if isinstance(risk, dict) else "") or "")
         if _r330_auth_blk:
             prompt += _r330_auth_blk
+
+        # P1 — feed the derived SUT AUTHORIZATION contract (route catalog) so
+        # generated assertions use the REAL success_status + EXEMPT semantics.
+        _az_blk = self._authz_grounding_block(
+            (risk.get("project_id") if isinstance(risk, dict) else "") or "",
+            gherkin_text, self._r126_a_is_ollama_provider(self._client))
+        if _az_blk:
+            prompt += "\n\n" + _az_blk
 
         # Phase AD/2 — augment the test SCRIPT with the SUT architecture
         # (Phase 1 discovery graphs): real endpoints + protocols, the auth
@@ -10616,6 +10630,62 @@ Output: Complete .cy.ts file.
             return ""
 
     @staticmethod
+    def _authz_grounding_block(project_id: str, gherkin_text: str = "",
+                              is_ollama: bool = False) -> str:
+        """P1 — feed the derived SUT AUTHORIZATION contract (route catalog:
+        per-op scope/visibility/auth-gated/success_status) into gen so tests
+        assert the REAL status instead of guessing. The status DRIVER is
+        success_status + EXEMPT membership (deterministic from OpenAPI); the
+        heuristic `perm~` stays advisory. Mainstream gen runs as ONE privileged
+        token, so this grounds POSITIVE/EXEMPT expectations, NOT per-principal
+        403s (the per-principal negative matrix is the dedicated
+        authz_matrix_gen flow). Reuses summarize_authz_for_prompt (single
+        source); relevant-path scoped so truncation never drops the relevant op.
+        Killswitch ARTA_AUTHZ_GROUNDING_DISABLE=1. Fail-open ("" when no model)."""
+        import os as _os_az
+        if _os_az.environ.get("ARTA_AUTHZ_GROUNDING_DISABLE") == "1":
+            return ""
+        try:
+            from .authz_discovery import (summarize_authz_for_prompt,
+                                          load_authz_model)
+            rel = None
+            if gherkin_text:
+                model = load_authz_model(project_id)
+                if model:
+                    gated_lines = "\n".join(
+                        f"{o['method']} {o['path']}" for o in model["operations"]
+                        if o.get("auth_gated"))
+                    filtered = AutomationEngineerAgent._filter_endpoints_by_gherkin(
+                        gated_lines, gherkin_text, top_n=30)
+                    rel = {ln.split(None, 1)[1] for ln in filtered.splitlines()
+                           if " " in ln}
+            _max = 600 if is_ollama else 1500
+            return summarize_authz_for_prompt(project_id, max_chars=_max,
+                                              relevant_paths=rel)
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _authz_op_for(method: str, concrete_path: str, az_ops: list) -> dict | None:
+        """Template-aware match of a concrete request path (e.g.
+        /v1/organizations/vendor/iam/groups) to a route-catalog op whose path is
+        a template (/v1/organizations/{orgId}/iam/groups). Method + segment-count
+        must match; a `{param}` segment matches any concrete segment. Returns the
+        op dict or None. Used by P1.2 to attach the authz verdict per Newman item."""
+        m = (method or "GET").upper()
+        cs = [s for s in (concrete_path or "").split("/") if s]
+        for op in az_ops or []:
+            if (op.get("method") or "GET").upper() != m:
+                continue
+            ts = [s for s in (op.get("path") or "").split("/") if s]
+            if len(ts) != len(cs):
+                continue
+            if all(t.startswith("{") or t.lower() == c.lower()
+                   for t, c in zip(ts, cs)):
+                return op
+        return None
+
+    @staticmethod
     def _r243_login_contract_block(
         project: dict | None, req_id: str = "", project_id: str = "",
     ) -> str:
@@ -12106,6 +12176,11 @@ Output: Complete .cy.ts file.
             (risk or {}).get("_project_dict") if isinstance(risk, dict) else None,
             (risk.get("project_id") if isinstance(risk, dict) else "") or "",
         )
+        # P1 — derived SUT AUTHORIZATION contract (Pass-1: EXEMPT/gated awareness;
+        # the per-item status assertions land in Pass-2). Never values.
+        _r243_newman_block += self._authz_grounding_block(
+            (risk.get("project_id") if isinstance(risk, dict) else "") or "",
+            gherkin_text, self._r126_a_is_ollama_provider(self._client))
 
         # R118.F — Newman parity for R118.B's Gherkin-keyword negative
         # endpoint constraint. Same helper, same data source; the LLM
@@ -12552,6 +12627,19 @@ Output ONLY the JSON. No prose. Start with `{{` end with `}}`.
             except Exception as _r305_exc:
                 log.debug("R305 G2: captured-shape load skipped: %s", _r305_exc)
 
+        # P1.2 — the assertion-correctness core: index the derived authz route
+        # catalog so each item can assert the REAL success_status (gated op, as
+        # the privileged primary caller) or 200 (EXEMPT). Deterministic from
+        # OpenAPI; never the heuristic permission. Killswitch shared with P1.
+        _az_ops: list[dict] = []
+        if project_id and os.environ.get("ARTA_AUTHZ_GROUNDING_DISABLE") != "1":
+            try:
+                from .authz_discovery import load_authz_model as _az_load
+                _az_model = _az_load(project_id)
+                _az_ops = (_az_model or {}).get("operations") or []
+            except Exception as _az_exc:
+                log.debug("P1.2 authz attach skipped: %s", _az_exc)
+
         gherkin_ctx = self._sanitize_for_prompt(gherkin_text, max_len=3000)
         failed_batches = 0
         total_batches = 0
@@ -12591,6 +12679,17 @@ Output ONLY the JSON. No prose. Start with `{{` end with `}}`.
                         _r305_item["method"], _r305_path, _r305_captured)
                     if _r305_shape:
                         _r305_item["response_shape"] = _r305_shape
+                # P1.2 — attach the authz verdict for this item (scoped to the
+                # batch's items = bloat-safe). Template-aware path match.
+                if _az_ops and url_raw:
+                    from urllib.parse import urlparse as _az_urlparse
+                    _az_path = _az_urlparse(
+                        str(url_raw).replace("{{base_url}}", "").replace("{{baseUrl}}", "")
+                    ).path or ""
+                    _az_hit = self._authz_op_for(_r305_item["method"], _az_path, _az_ops)
+                    if _az_hit:
+                        _r305_item["authz_expected_status"] = _az_hit.get("success_status")
+                        _r305_item["authz_is_exempt"] = not _az_hit.get("auth_gated")
                 batch_summary.append(_r305_item)
 
             prompt = f"""\
@@ -12743,6 +12842,17 @@ response structure. Assert against it EXACTLY — do NOT guess:
   `pm.expect(body).to.be.an('array')` is correct.
 - Only assert existence of keys listed in `response_shape.keys`.
 Ignoring this produces `expected {{ servers: [ ... ] }} to be an array` failures.
+
+[P1.2 AUTHORIZATION STATUS GROUNDING (HARD CONSTRAINT — derived from the SUT authz model)]
+These requests run as the SINGLE privileged/primary token, so:
+- `authz_is_exempt: true` → the op is public/self-service; assert 200 for the
+  caller. Never treat an exempt 200 as a role privilege.
+- `authz_expected_status: <code>` → assert THAT status with
+  `pm.response.to.have.status(<code>)` (e.g. a create is 201, an accepted async
+  op is 202) — it is the SUT's REAL success code, not a guessed 200.
+- Do NOT assert 403/401 as the expected outcome for these items — a privileged
+  caller succeeds; the negative per-principal (under-privileged → 403) matrix is
+  generated separately, not here.
 
 RULES BY ITEM TYPE:
 - Items whose name starts with "ATTACK:" or contains SQLi/XSS/injection:
