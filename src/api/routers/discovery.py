@@ -452,6 +452,10 @@ async def grounding_coverage(project_id: str) -> dict:
                                             rt.get("potentially_incorrect_count", 0)),
             # Code→API spine: tests whose endpoints resolve to a real SUT source file.
             "source_component_count": rt.get("source_component_count", 0),
+            # API→Data spine: tests touching a named SUT domain entity + the
+            # distinct entities under test (coverage-by-entity).
+            "data_object_count": rt.get("data_object_count", 0),
+            "entities_under_test": rt.get("entities_under_test", []),
         }
     except Exception as exc:
         log.debug("grounding_coverage tests block skipped: %s", exc)

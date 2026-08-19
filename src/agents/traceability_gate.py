@@ -448,6 +448,25 @@ def authz_stamp(matched_endpoint_keys, authz_model: dict | None) -> dict:
     return {"gated_endpoints": gated, "gated_count": len(gated)}
 
 
+# ── Data-Object stamp — the domain-entity dimension of a test's traceability ──
+
+def data_object_stamp(matched_endpoint_keys, entity_map: dict | None) -> dict:
+    """The Data-Object dimension of a test's traceability: which SUT domain
+    entities (OpenAPI component schemas — `WidgetDto`, `Order`, …) the
+    endpoints it exercises read or write. Completes the Req→…→API→Data spine.
+
+    `matched_endpoint_keys` are `METHOD:/template` (from assess_traceability);
+    `entity_map` is `{METHOD:/path → entity}` from sut_topology.openapi_entity_index
+    (both OpenAPI-derived, keyed identically). Returns
+    {objects:[{key,entity}], object_count, entities:[distinct]}. Empty when no
+    entity match — the caller stamps only when object_count>0. Deterministic; no LLM."""
+    if not matched_endpoint_keys or not entity_map:
+        return {"objects": [], "object_count": 0, "entities": []}
+    objs = [{"key": k, "entity": entity_map[k]} for k in matched_endpoint_keys if k in entity_map]
+    entities = sorted({o["entity"] for o in objs})
+    return {"objects": objs, "object_count": len(objs), "entities": entities}
+
+
 # ── Source-Code-Component stamp — the Code→API link of a test's traceability ──
 
 def source_component_stamp(matched_endpoint_keys, mapped_endpoints: list | None) -> dict:
@@ -572,6 +591,12 @@ def read_traceability(project_id: str) -> dict:
     # real SUT source file (source_component_stamp), not just source_verified.
     source_component_count = sum(
         1 for r in rows if (r.get("source_components") or {}).get("component_count"))
+    # API→Data spine: tests whose endpoints touch a named SUT domain entity, plus
+    # the distinct set of entities under test (coverage-by-entity).
+    data_object_count = sum(
+        1 for r in rows if (r.get("data_objects") or {}).get("object_count"))
+    entities_under_test = sorted({
+        e for r in rows for e in ((r.get("data_objects") or {}).get("entities") or [])})
     return {
         "project_id": project_id,
         "test_count": n,
@@ -583,4 +608,6 @@ def read_traceability(project_id: str) -> dict:
         "source_grounding": dict(src_status),
         "needs_attention_count": needs_attention,
         "source_component_count": source_component_count,
+        "data_object_count": data_object_count,
+        "entities_under_test": entities_under_test,
     }

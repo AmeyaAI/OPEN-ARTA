@@ -129,6 +129,11 @@ export default function SutUnderstandingPanel({ projectId }: { projectId: string
                 {' · '}<span style={{ color: '#10b981' }}>🔗 {t.source_component_count} Code→API grounded</span>
               </span>
             )}
+            {(t.data_object_count ?? 0) > 0 && (
+              <span title={`Tests touching a named SUT domain entity (API→Data spine)${(t.entities_under_test?.length ?? 0) > 0 ? ' · entities: ' + t.entities_under_test!.slice(0, 8).join(', ') : ''}`}>
+                {' · '}<span style={{ color: '#38bdf8' }}>◆ {t.data_object_count} Data-linked{(t.entities_under_test?.length ?? 0) > 0 ? ` (${t.entities_under_test!.length} entities)` : ''}</span>
+              </span>
+            )}
           </div>
           <Bar dist={t.grounded_by || {}} />
         </div>
