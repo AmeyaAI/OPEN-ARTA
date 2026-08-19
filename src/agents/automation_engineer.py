@@ -3887,6 +3887,9 @@ class AutomationEngineerAgent:
                     _bk6_neg = self._r118_b_negative_endpoint_constraint(combined_gherkin, _bk6_caps)
                     if _bk6_neg:
                         prompt += "\n" + _bk6_neg
+                    _bk6_shapes = self._k6_body_shape_block(_bk6_caps, combined_gherkin)
+                    if _bk6_shapes:
+                        prompt += "\n" + _bk6_shapes
                     log.info(
                         "R217: injected %d real GET endpoint(s) into BATCH k6 grounding for %s",
                         len(_bk6_block.splitlines()), req_id)
@@ -10476,6 +10479,45 @@ Output: Complete .cy.ts file.
         return AutomationEngineerAgent._filter_endpoints_by_gherkin(
             "\n".join(lines), gherkin_text, top_n=top_n)
 
+    @staticmethod
+    def _k6_body_shape_block(
+        captured_endpoints: list[dict] | None,
+        gherkin_text: str,
+        top_n: int = 12,
+    ) -> str:
+        """Body-check grounding for k6: captured top-level response keys per GET
+        endpoint, so `check()` bodies assert REAL envelope keys (organizations/
+        projects/regions) — never invented generic ones. Live: batch-generated
+        k6 specs asserted `has items array` against a `{organizations: […]}`
+        response → 114/114 iterations failed, destroying the perf signal.
+        Empty when no captured shapes exist. Single source for the batch AND
+        sequential k6 paths (R219.K lesson)."""
+        lines = []
+        for e in captured_endpoints or []:
+            if not isinstance(e, dict) or not e.get("path"):
+                continue
+            if (e.get("method") or "GET").upper() != "GET":
+                continue
+            sh = e.get("response_body_shape")
+            props = (sh or {}).get("properties") if isinstance(sh, dict) else None
+            if not isinstance(props, dict) or not props:
+                continue
+            keys = ", ".join(sorted(props.keys())[:6])
+            lines.append(f"GET {e['path']} -> top-level keys: {keys}")
+        if not lines:
+            return ""
+        picked = AutomationEngineerAgent._filter_endpoints_by_gherkin(
+            "\n".join(sorted(set(lines))), gherkin_text, top_n=top_n)
+        if not picked.strip():
+            return ""
+        return (
+            "\n[K6 BODY-CHECK GROUNDING — assert ONLY captured response keys]\n"
+            "k6 check() bodies MUST reference only these CAPTURED top-level keys "
+            "for each endpoint. NEVER invent generic envelopes (`items`, `data`, "
+            "`results`, `content`) you did not capture — an invented key fails "
+            "100% of iterations and destroys the perf signal.\n" + picked + "\n"
+        )
+
     # R118.B — Gherkin-keyword stopword list. Tokens that are NEVER
     # meaningful endpoint-path candidates (Gherkin keywords, common
     # English connectives, narrative verbs). Curated to be CONSERVATIVE:
@@ -15305,6 +15347,9 @@ Output ONLY the JSON. No prose. One entry per item in this batch.
                         _k6_neg = self._r118_b_negative_endpoint_constraint(gherkin_text, _k6_caps)
                         if _k6_neg:
                             prompt += "\n" + _k6_neg
+                        _k6_shapes = self._k6_body_shape_block(_k6_caps, gherkin_text)
+                        if _k6_shapes:
+                            prompt += "\n" + _k6_shapes
                         log.info(
                             "R217: injected %d real GET endpoint(s) as k6 load-test "
                             "grounding for %s", len(_k6_block.splitlines()), req_id)
