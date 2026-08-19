@@ -574,7 +574,16 @@ async def run(*, project: dict, project_id: str, neo4j_driver: Any = None,
                 return texts
 
             _proto_agg = {"services": [], "messages": []}
-            for _txt in await _p3_fetch_hits("rpc extension:proto", 5):
+            # Prefer a DETERMINISTIC tree-walk of the configured repos — GitHub
+            # code-search does not index every private repo, so `search_code`
+            # returns 0 `.proto` for a private SUT auth service (the gRPC blind
+            # spot). Fall back to the org-wide code search when no repos are
+            # configured / the tree-walk finds nothing.
+            _proto_texts = [pf["text"]
+                            for pf in await _ghc.fetch_files_by_extension(project, ".proto", cap=10)]
+            if not _proto_texts:
+                _proto_texts = await _p3_fetch_hits("rpc extension:proto", 5)
+            for _txt in _proto_texts:
                 _pp = _proto_p3.parse_proto(_txt)
                 _proto_agg["services"].extend(_pp.get("services") or [])
                 _proto_agg["messages"].extend(_pp.get("messages") or [])

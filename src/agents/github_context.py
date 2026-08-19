@@ -398,6 +398,72 @@ async def get_file(project: dict, repo: str, file_path: str) -> str:
         await client.stop()
 
 
+def _project_repo_entries(project: dict) -> list[tuple[str, str]]:
+    """The project's configured repos as `(owner/name, ref)` pairs — honouring a
+    per-entry `branch` (some SUTs keep their backend on a non-default branch),
+    defaulting to `HEAD`. Includes a single `github_repo` if set."""
+    integrations = project.get("integrations", {})
+    if hasattr(integrations, "model_dump"):
+        integrations = integrations.model_dump()
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for r in (integrations.get("repositories") or []):
+        full = r.get("repo") if isinstance(r, dict) else r
+        ref = (r.get("branch") if isinstance(r, dict) else None) or "HEAD"
+        if full and "/" in str(full) and str(full) not in seen:
+            seen.add(str(full))
+            out.append((str(full), str(ref)))
+    single = integrations.get("github_repo")
+    if single and "/" in str(single) and str(single) not in seen:
+        out.append((str(single), "HEAD"))
+    return out
+
+
+async def fetch_files_by_extension(project: dict, ext: str, *, cap: int = 10) -> list[dict]:
+    """Deterministically fetch source files with a given extension from the
+    project's configured repos by walking each repo's git tree (recursive, on the
+    configured branch) and filtering by extension. More reliable than GitHub
+    CODE-SEARCH, which does not index every private repo (so an org-scoped
+    `search_code` misses `.proto` in a private SUT repo — the gRPC-discovery blind
+    spot). Returns [{repo, path, text}] (≤ `cap` total); [] when no token / no
+    repos configured. Files cached per path via get_file. Killswitch
+    ARTA_GH_TREE_WALK_DISABLE."""
+    if os.environ.get("ARTA_GH_TREE_WALK_DISABLE") == "1":
+        return []
+    token = _gh_token(project)
+    entries = _project_repo_entries(project)
+    if not token or not entries:
+        return []
+    import httpx
+    headers = {"Authorization": f"token {token}",
+               "Accept": "application/vnd.github.v3+json"}
+    out: list[dict] = []
+    async with httpx.AsyncClient(timeout=20, headers=headers) as client:
+        for repo, ref in entries:
+            if len(out) >= cap:
+                break
+            try:
+                r = await client.get(
+                    f"https://api.github.com/repos/{repo}/git/trees/{ref}?recursive=1")
+                if r.status_code != 200:
+                    log.debug("fetch_files_by_extension: tree %s@%s -> HTTP %s",
+                              repo, ref, r.status_code)
+                    continue
+                tree = (r.json() or {}).get("tree") or []
+            except Exception as e:
+                log.debug("fetch_files_by_extension: tree %s@%s failed: %s", repo, ref, e)
+                continue
+            for node in tree:
+                if len(out) >= cap:
+                    break
+                p = node.get("path") or ""
+                if node.get("type") == "blob" and p.endswith(ext):
+                    txt = await get_file(project, repo, p)
+                    if txt:
+                        out.append({"repo": repo, "path": p, "text": txt})
+    return out
+
+
 async def search_code(project: dict, query: str, repo: str | None = None) -> str:
     """Search for code across a project's repos, returning the GitHub search/code
     JSON text (`{"items":[{"repository":{"full_name":..},"path":..}]}`).
