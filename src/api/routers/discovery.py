@@ -501,10 +501,33 @@ async def grounding_coverage(project_id: str) -> dict:
     else:
         note = ("No source (GitHub) grounding configured/reachable for this SUT — human "
                 "correction (Refine with AI) is the authoritative grounding source.")
+    # Protocol mix — the SUT's non-REST surface, computed from the DURABLE
+    # per-endpoint protocol tag (classify_protocol at _load_captured_endpoints)
+    # + the discovered gRPC surface. Truthful/current (the architecture api_graph
+    # protocol_counts can be stale); makes the multi-protocol understanding
+    # observable. Killswitch ARTA_PROTOCOL_SUMMARY_DISABLE.
+    protocols: dict = {}
+    if os.environ.get("ARTA_PROTOCOL_SUMMARY_DISABLE") != "1":
+        try:
+            from collections import Counter as _PCounter
+            _caps = ad._load_captured_endpoints(project_id) or []
+            _pc = _PCounter((e.get("protocol") or "rest")
+                            for e in _caps if isinstance(e, dict) and e.get("path"))
+            protocols = {"by_protocol": dict(_pc),
+                         "non_rest": sum(v for k, v in _pc.items() if k != "rest")}
+            from ...agents.grpc_stub_gen import load_grpc_surface
+            _gs = load_grpc_surface(project_id)
+            if _gs.get("services"):
+                protocols["grpc_services"] = len(_gs["services"])
+                protocols["grpc_methods"] = sum(
+                    len(s.get("methods") or []) for s in _gs["services"])
+        except Exception as _proto_exc:
+            log.debug("protocol summary skipped for %s: %s", project_id, _proto_exc)
     return {
         "project_id": project_id,
         **cov,
         "tests": tests_block,
+        "protocols": protocols,
         "source_grounding_available": source_available,
         "source_grounding": {"token_available": token_available,
                              "repo_configured": repo_configured},
