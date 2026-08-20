@@ -532,14 +532,14 @@ async def analyze_defect(defect_id: str, request: Request):
     except (ImportError, AttributeError):
         pass
 
-    # FE-sync P1 — the explicit "Run 5-level deep-dive" request must produce the
-    # FULL LLM RCA (5-level deep_dive + preventive_action). The bulk
-    # analyze_failures() path TRIAGES first and short-circuits every
-    # non-sut_regression defect (test_gen_bug / operator_review) into a
-    # deterministic dict with NO deep_dive — so for the operator's explicit descent
-    # we call the single-defect RCA (`_analyze_single`, which runs RCA_PROMPT's
-    # 5-level schema + normalizes it) directly. Fall back to analyze_failures only
-    # if that path is unavailable/errors, so we still return a root_cause.
+    # FE-sync P1 — the explicit "Run 5-level deep-dive" request escalates to the
+    # FULL LLM RCA. The bulk analyze_failures() path now gives every
+    # non-sut_regression defect a DETERMINISTIC 5-level deep_dive + preventive_action
+    # (deterministic_rca_fields — no LLM, charter efficiency), so the dashboard is
+    # never blank; this endpoint is the OPERATOR-REQUESTED escalation to a richer
+    # per-defect LLM analysis, which overrides the deterministic baseline below.
+    # We call the single-defect RCA (`_analyze_single`, RCA_PROMPT's 5-level schema)
+    # directly, falling back to analyze_failures only if unavailable/errors.
     analysis: dict | None = None
     single = getattr(agent, "_analyze_single", None)
     if single is not None:
