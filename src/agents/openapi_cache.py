@@ -96,6 +96,20 @@ async def fetch_openapi(api_base_url: str, project_id: str) -> dict | None:
             )
             return spec
 
+    # Stale-but-present fallback: the cache was TTL-expired AND every live probe
+    # failed (e.g. a SUT whose OpenAPI is source-derived, not served at a live
+    # swagger path). A stale 164-op spec of REAL SUT understanding beats None —
+    # which would make R67.A refuse Newman gen entirely. Charter: feed the SUT
+    # understanding we HAVE rather than discarding it. (All-stub docs still miss.)
+    stale = _read_cache(project_id, allow_stale=True)
+    if stale is not None:
+        log.info(
+            "R18a: serving STALE OpenAPI cache for %s (live re-fetch at %s "
+            "failed; %d paths) — beats refusing gen",
+            project_id, base, len(stale.get("paths") or {}),
+        )
+        return stale
+
     log.info("R18a: no OpenAPI spec found at %s for project %s", base, project_id)
     return None
 
@@ -228,12 +242,12 @@ def _cache_path(project_id: str) -> Path:
     return _CACHE_DIR / f"{project_id}.json"
 
 
-def _read_cache(project_id: str) -> dict | None:
+def _read_cache(project_id: str, *, allow_stale: bool = False) -> dict | None:
     p = _cache_path(project_id)
     if not p.is_file():
         return None
     try:
-        if time.time() - p.stat().st_mtime > _TTL_SEC:
+        if not allow_stale and time.time() - p.stat().st_mtime > _TTL_SEC:
             return None
         spec = json.loads(p.read_text())
         # R330 P2b — a doc whose ops are ALL arta-merged stubs (persist_openapi_doc)
