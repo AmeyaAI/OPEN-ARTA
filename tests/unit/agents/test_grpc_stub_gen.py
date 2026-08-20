@@ -54,6 +54,17 @@ def test_no_proto_files(tmp_path):
     assert res["modules"] == [] and res["errors"] == ["no_proto_files"]
 
 
+def test_basename_collision_is_loud_not_silent(tmp_path):
+    # two protos share a basename in different dirs → keep first, skip + record
+    a = {"path": "svc-a/common.proto", "text":
+         'service AlphaService { rpc GetA (R) returns (T); }\nmessage R{}\nmessage T{}\n'}
+    b = {"path": "svc-b/common.proto", "text":
+         'service BetaService { rpc GetB (R) returns (T); }\nmessage R{}\nmessage T{}\n'}
+    res = compile_protos([a, b], tmp_path / "stubs")
+    assert res["modules"] == ["common"]                       # only the first stem
+    assert any("basename_collision_skipped" in e for e in res["errors"])
+
+
 def test_killswitch(tmp_path, monkeypatch):
     monkeypatch.setenv("ARTA_GRPC_STUB_GEN_DISABLE", "1")
     assert compile_protos([_PROTO], tmp_path / "stubs")["disabled"] is True
