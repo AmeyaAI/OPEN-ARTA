@@ -614,6 +614,7 @@ class TestCaseVersion(Base):
     gherkin_snapshot: Mapped[str | None] = mapped_column(Text)
     script_snapshot: Mapped[str | None] = mapped_column(Text)
     metadata_snapshot: Mapped[dict | None] = mapped_column(JSONB)
+    row_snapshot: Mapped[dict | None] = mapped_column(JSONB)
     changed_by: Mapped[str] = mapped_column(Text, default="arta-agent")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 

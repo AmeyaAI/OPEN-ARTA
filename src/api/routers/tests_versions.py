@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -75,12 +76,24 @@ async def snapshot_test_cases(db, test_ids, batch_id: str, *,
         from ...db.repository import TestCaseVersionRepo
         ver_repo = TestCaseVersionRepo(db)
         rows = (await db.execute(_sql(
-            "SELECT test_id, gherkin_scenario, script_content, script_path, metadata "
+            "SELECT test_id, gherkin_scenario, script_content, script_path, metadata, "
+            "title, automation_tool::text AS tool, priority::text AS priority, "
+            "test_type::text AS test_type, requirement_id::text AS requirement_id, "
+            "ac_id::text AS ac_id, project_id::text AS project_id, tags "
             "FROM test_cases WHERE test_id = ANY(:ids)"), {"ids": test_ids})).all()
         made = 0
         for r in rows:
             gherkin = r.gherkin_scenario or ""
             canonical = _canonical_script(r.script_path, r.script_content)
+            # Full-row scaffold — enough to RESURRECT this row if a later regen
+            # deletes it outright (test_cases has NOT-NULL title/type/tool/priority).
+            row_scaffold = {
+                "test_id": r.test_id, "title": r.title, "automation_tool": r.tool,
+                "priority": r.priority, "test_type": r.test_type,
+                "requirement_id": r.requirement_id, "ac_id": r.ac_id,
+                "project_id": r.project_id, "script_path": r.script_path,
+                "tags": list(r.tags) if r.tags else [],
+            }
             if hash_gate:
                 h = hashlib.sha256((gherkin + "\x00" + canonical).encode("utf-8", "replace")).hexdigest()
                 latest = await ver_repo.list_versions(r.test_id)
@@ -96,6 +109,7 @@ async def snapshot_test_cases(db, test_ids, batch_id: str, *,
                 "gherkin_snapshot": gherkin,
                 "script_snapshot": canonical,
                 "metadata_snapshot": r.metadata if isinstance(r.metadata, dict) else None,
+                "row_snapshot": row_scaffold,
                 "changed_by": "force_regen" if reason_prefix == "pre_regen" else "arta-revert",
             })
             made += 1
@@ -143,24 +157,61 @@ async def apply_version_to_test_case(db, test_id: str, target, *,
 
     cur = (await db.execute(_sql(
         "SELECT script_path FROM test_cases WHERE test_id = :tid"), {"tid": test_id})).first()
-    script_path = cur.script_path if cur else None
 
     gherkin = target.gherkin_snapshot
     script = target.script_snapshot
     metadata = getattr(target, "metadata_snapshot", None)
+    scaffold = getattr(target, "row_snapshot", None) or {}
 
-    # (2) DB — metadata_ column carries the test's OWN traceability lineage.
-    updates: dict = {}
-    if gherkin:
-        updates["gherkin_scenario"] = gherkin
-    if script:
-        updates["script_content"] = script
-    if isinstance(metadata, dict):
-        updates["metadata_"] = metadata
-    if updates:
-        await tc_repo.update(test_id, updates)
+    status = {"applied": [], "disk": False, "sidecar": False, "resurrected": False}
 
-    status = {"applied": list(updates.keys()), "disk": False, "sidecar": False}
+    if cur is not None:
+        # (2a) row still exists → restore its content in place.
+        script_path = cur.script_path
+        updates: dict = {}
+        if gherkin:
+            updates["gherkin_scenario"] = gherkin
+        if script:
+            updates["script_content"] = script
+        if isinstance(metadata, dict):
+            updates["metadata_"] = metadata
+        if updates:
+            await tc_repo.update(test_id, updates)
+        status["applied"] = list(updates.keys())
+    elif scaffold:
+        # (2b) row was DELETED by a regen → RESURRECT it from the scaffold. This
+        # is what makes "undo my force-generate" restore the WHOLE prior gen, not
+        # just the tests that still exist.
+        script_path = scaffold.get("script_path")
+        await db.execute(_sql("""
+            INSERT INTO test_cases (test_id, title, gherkin_scenario, script_content,
+                script_path, automation_tool, priority, test_type, is_automated,
+                requirement_id, ac_id, project_id, metadata, tags)
+            VALUES (:test_id, :title, :gherkin, :script, :script_path,
+                CAST(:tool AS automation_tool), CAST(:priority AS risk_priority),
+                CAST(:test_type AS test_type), true,
+                CAST(NULLIF(:requirement_id,'') AS uuid), CAST(NULLIF(:ac_id,'') AS uuid),
+                CAST(NULLIF(:project_id,'') AS uuid), CAST(:metadata AS jsonb), :tags)
+            ON CONFLICT (test_id) DO NOTHING
+        """), {
+            "test_id": test_id, "title": scaffold.get("title") or test_id,
+            "gherkin": gherkin or "", "script": script or "", "script_path": script_path,
+            "tool": scaffold.get("automation_tool") or "playwright",
+            "priority": scaffold.get("priority") or "P2",
+            "test_type": scaffold.get("test_type") or "integration",
+            "requirement_id": scaffold.get("requirement_id") or "",
+            "ac_id": scaffold.get("ac_id") or "",
+            "project_id": scaffold.get("project_id") or "",
+            "metadata": json.dumps(metadata if isinstance(metadata, dict) else {}),
+            "tags": scaffold.get("tags") or [],
+        })
+        status["applied"] = ["resurrected"]
+        status["resurrected"] = True
+    else:
+        # deleted AND no scaffold (pre-migration snapshot) — content preserved in
+        # history but the row can't be rebuilt. Honest no-op.
+        log.warning("revert: %s was deleted and has no row_snapshot — cannot resurrect", test_id)
+        script_path = None
 
     # (3) disk (canonical/executable) — guarded against path traversal.
     if script and script_path:
@@ -353,6 +404,7 @@ async def rollback_test(test_id: str, body: RollbackRequest | None = None):
                         "gherkin_snapshot": target.gherkin_snapshot or "",
                         "script_snapshot": target.script_snapshot or "",
                         "metadata_snapshot": getattr(target, "metadata_snapshot", None),
+                        "row_snapshot": getattr(target, "row_snapshot", None),
                         "changed_by": "arta-rollback",
                     })
 
@@ -396,6 +448,7 @@ async def revert_to_version(test_id: str, version: int):
                 "gherkin_snapshot": target.gherkin_snapshot or "",
                 "script_snapshot": target.script_snapshot or "",
                 "metadata_snapshot": getattr(target, "metadata_snapshot", None),
+                "row_snapshot": getattr(target, "row_snapshot", None),
                 "changed_by": "arta-agent",
             })
 
@@ -441,24 +494,34 @@ async def restore_previous_generation(req_id: str):
         from ...db.repository import TestCaseVersionRepo
         ver_repo = TestCaseVersionRepo(db)
 
-        # Enumerate the requirement's current test_ids: by the requirement FK AND
-        # by test_id shape (Newman/k6 rows can have a NULL requirement_id).
+        # Identify the LATEST force-regen batch for this requirement — the
+        # pre_regen snapshots it wrote ARE "the generation before the last
+        # force-generate". Scope by test_id shape (version rows carry no
+        # requirement FK). Enumerating from the VERSION table (not current
+        # test_cases) is what lets us resurrect tests a regen deleted outright.
         tc_pat = req.replace("REQ-", "TC-")
-        rows = (await db.execute(_sql(
-            "SELECT DISTINCT test_id FROM test_cases WHERE "
-            "requirement_id = (SELECT id FROM requirements WHERE req_id = :req LIMIT 1) "
-            "OR test_id LIKE :p1 OR test_id LIKE :p2 OR test_id LIKE :p3"),
-            {"req": req, "p1": f"{tc_pat}-%", "p2": f"{req}-%", "p3": f"{req}%"})).all()
-        test_ids = sorted({r.test_id for r in rows})
+        latest = (await db.execute(_sql(
+            "SELECT change_reason FROM test_case_versions "
+            "WHERE change_reason LIKE 'pre_regen:%' "
+            "AND (test_id LIKE :p1 OR test_id LIKE :p2 OR test_id LIKE :p3) "
+            "ORDER BY created_at DESC LIMIT 1"),
+            {"p1": f"{tc_pat}-%", "p2": f"{req}-%", "p3": f"{req}%"})).first()
+        if not latest:
+            raise HTTPException(404, f"No prior-generation snapshot for requirement {req}")
+        batch = latest.change_reason  # "pre_regen:<job_id>"
+        tid_rows = (await db.execute(_sql(
+            "SELECT DISTINCT test_id FROM test_case_versions WHERE change_reason = :batch"),
+            {"batch": batch})).all()
+        test_ids = sorted({r.test_id for r in tid_rows})
 
         reverted, skipped = [], []
         for tid in test_ids:
             try:
                 versions = await ver_repo.list_versions(tid)  # desc by version
-                target = next((v for v in versions
-                               if (v.change_reason or "").startswith("pre_regen:")), None)
+                # the snapshot THIS batch captured for this test (its prior state)
+                target = next((v for v in versions if v.change_reason == batch), None)
                 if not target:
-                    skipped.append({"test_id": tid, "reason": "no pre_regen snapshot"})
+                    skipped.append({"test_id": tid, "reason": "no snapshot in batch"})
                     continue
                 status = await apply_version_to_test_case(db, tid, target)
                 await ver_repo.create_version({
@@ -467,6 +530,7 @@ async def restore_previous_generation(req_id: str):
                     "gherkin_snapshot": target.gherkin_snapshot or "",
                     "script_snapshot": target.script_snapshot or "",
                     "metadata_snapshot": getattr(target, "metadata_snapshot", None),
+                    "row_snapshot": getattr(target, "row_snapshot", None),
                     "changed_by": "arta-restore",
                 })
                 reverted.append({"test_id": tid, "to_version": target.version, "restored": status})
@@ -476,5 +540,7 @@ async def restore_previous_generation(req_id: str):
 
         if not test_ids:
             raise HTTPException(404, f"No test cases found for requirement {req}")
-        return {"requirement_id": req, "reverted": len(reverted),
-                "skipped": len(skipped), "reverted_tests": reverted, "skipped_tests": skipped}
+        resurrected = sum(1 for r in reverted if (r.get("restored") or {}).get("resurrected"))
+        return {"requirement_id": req, "batch": batch, "reverted": len(reverted),
+                "resurrected": resurrected, "skipped": len(skipped),
+                "reverted_tests": reverted, "skipped_tests": skipped}
