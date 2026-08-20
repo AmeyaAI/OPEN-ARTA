@@ -17,15 +17,181 @@ working.
 from __future__ import annotations
 
 import difflib
+import hashlib
+import logging
+import os
+from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import text as _sql
 
 from ..dependencies import require_api_key as _require_api_key
 from .tests_state import MOCK_VERSIONS
 
+log = logging.getLogger("arta.tests_versions")
 
 versions_router = APIRouter()
+
+
+# ── Versioning helpers (snapshot before destroy + atomic revert) ─────────────
+# The versioning stack (test_case_versions + TestCaseVersionRepo + the revert
+# endpoints) pre-dates these; it was never FED. These two helpers feed it and
+# make revert restore ALL of a script's stores (disk = canonical/executable,
+# DB script_content = UI cache, sidecar = durable, metadata = traceability).
+
+
+def _canonical_script(script_path: str | None, script_content_cache: str | None) -> str:
+    """Canonical script = the on-disk file at script_path (source of truth /
+    what actually executes), falling back to the DB cache when the file is
+    absent/unreadable — a hand-edit on disk must not be snapshotted as a stale
+    cache."""
+    if script_path:
+        try:
+            p = Path(script_path)
+            if not p.is_absolute():
+                p = Path.cwd() / p
+            if p.is_file():
+                return p.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    return script_content_cache or ""
+
+
+async def snapshot_test_cases(db, test_ids, batch_id: str, *,
+                              reason_prefix: str = "pre_regen",
+                              hash_gate: bool = True) -> int:
+    """Snapshot the CURRENT test_cases rows into test_case_versions BEFORE they
+    are overwritten/deleted — feeding the existing revert stack. Captures the
+    canonical disk script + gherkin + metadata (traceability spine). Content-hash
+    gated (skip dup vs latest) unless hash_gate=False. Fail-open + killswitch
+    ARTA_TESTCASE_VERSIONING_DISABLE — a snapshot failure must NEVER block regen
+    (but logs LOUD: history was skipped). Returns number of versions created."""
+    test_ids = [t for t in (test_ids or []) if t]
+    if not test_ids or os.environ.get("ARTA_TESTCASE_VERSIONING_DISABLE") == "1":
+        return 0
+    try:
+        from ...db.repository import TestCaseVersionRepo
+        ver_repo = TestCaseVersionRepo(db)
+        rows = (await db.execute(_sql(
+            "SELECT test_id, gherkin_scenario, script_content, script_path, metadata "
+            "FROM test_cases WHERE test_id = ANY(:ids)"), {"ids": test_ids})).all()
+        made = 0
+        for r in rows:
+            gherkin = r.gherkin_scenario or ""
+            canonical = _canonical_script(r.script_path, r.script_content)
+            if hash_gate:
+                h = hashlib.sha256((gherkin + "\x00" + canonical).encode("utf-8", "replace")).hexdigest()
+                latest = await ver_repo.list_versions(r.test_id)
+                if latest:
+                    lv = latest[0]
+                    lh = hashlib.sha256(((lv.gherkin_snapshot or "") + "\x00"
+                                         + (lv.script_snapshot or "")).encode("utf-8", "replace")).hexdigest()
+                    if lh == h:
+                        continue  # unchanged since last snapshot — no dup row
+            await ver_repo.create_version({
+                "test_id": r.test_id,
+                "change_reason": f"{reason_prefix}:{batch_id}",
+                "gherkin_snapshot": gherkin,
+                "script_snapshot": canonical,
+                "metadata_snapshot": r.metadata if isinstance(r.metadata, dict) else None,
+                "changed_by": "force_regen" if reason_prefix == "pre_regen" else "arta-revert",
+            })
+            made += 1
+        return made
+    except Exception as exc:
+        log.warning("snapshot_test_cases SKIPPED (history NOT saved) batch=%s: %s: %s",
+                    batch_id, type(exc).__name__, exc)
+        return 0
+
+
+# Traversal-guard boundary — a DB-sourced script_path must resolve under here.
+_AUTOMATION_ROOT = (Path.cwd() / "src" / "automation").resolve()
+
+
+def _resolve_under_automation(script_path: str) -> Path | None:
+    """Resolve a (possibly relative) DB-sourced script_path and return it ONLY if
+    it stays under src/automation/ — else None (a DB-sourced path must not enable
+    traversal writes). Security boundary for revert's disk write."""
+    p = Path(script_path)
+    if not p.is_absolute():
+        p = Path.cwd() / p
+    rp = p.resolve()
+    root = str(_AUTOMATION_ROOT)
+    if str(rp) == root or str(rp).startswith(root + os.sep):
+        return rp
+    return None
+
+
+async def apply_version_to_test_case(db, test_id: str, target, *,
+                                     changed_by: str = "arta-revert") -> dict:
+    """Atomic + REVERSIBLE restore of a test case to a snapshot's content:
+    (1) snapshot the CURRENT row first (pre_revert) so the revert is itself
+    undoable — today the state you revert away from is lost; (2) DB
+    gherkin/script/metadata; (3) the executable disk file at script_path
+    (traversal-guarded under src/automation); (4) the .arta/generated_tests.json
+    sidecar. Each side effect is fail-open + logged. Reused by per-test revert
+    AND bulk restore. Returns {applied, disk, sidecar}."""
+    from ...db.repository import TestCaseRepo
+    tc_repo = TestCaseRepo(db)
+
+    # (1) reversibility — snapshot current before we overwrite it (always).
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    await snapshot_test_cases(db, [test_id], batch_id=stamp,
+                              reason_prefix="pre_revert", hash_gate=False)
+
+    cur = (await db.execute(_sql(
+        "SELECT script_path FROM test_cases WHERE test_id = :tid"), {"tid": test_id})).first()
+    script_path = cur.script_path if cur else None
+
+    gherkin = target.gherkin_snapshot
+    script = target.script_snapshot
+    metadata = getattr(target, "metadata_snapshot", None)
+
+    # (2) DB — metadata_ column carries the test's OWN traceability lineage.
+    updates: dict = {}
+    if gherkin:
+        updates["gherkin_scenario"] = gherkin
+    if script:
+        updates["script_content"] = script
+    if isinstance(metadata, dict):
+        updates["metadata_"] = metadata
+    if updates:
+        await tc_repo.update(test_id, updates)
+
+    status = {"applied": list(updates.keys()), "disk": False, "sidecar": False}
+
+    # (3) disk (canonical/executable) — guarded against path traversal.
+    if script and script_path:
+        try:
+            rp = _resolve_under_automation(script_path)
+            if rp is not None:
+                rp.parent.mkdir(parents=True, exist_ok=True)
+                rp.write_text(script, encoding="utf-8")
+                status["disk"] = True
+            else:
+                log.warning("revert disk write REFUSED (escapes src/automation): %s", script_path)
+        except Exception as exc:
+            log.warning("revert disk write failed test=%s: %s", test_id, exc)
+
+    # (4) sidecar (.arta/generated_tests.json) — best-effort.
+    try:
+        from .tests_state import GENERATED_TESTS
+        from .tests import _save_tests_json
+        for t in GENERATED_TESTS:
+            if str(t.get("id", "")).upper() == test_id.upper():
+                if script:
+                    t["script_content"] = script
+                if gherkin:
+                    t["gherkin"] = gherkin
+                    t["gherkin_scenario"] = gherkin
+                status["sidecar"] = True
+        _save_tests_json()
+    except Exception as exc:
+        log.debug("revert sidecar sync skipped test=%s: %s", test_id, exc)
+
+    return status
 
 
 class VersionCreateRequest(BaseModel):
@@ -175,13 +341,8 @@ async def rollback_test(test_id: str, body: RollbackRequest | None = None):
                         target = versions[1]
 
                 if target and not error:
-                    updates: dict = {}
-                    if target.gherkin_snapshot:
-                        updates["gherkin_scenario"] = target.gherkin_snapshot
-                    if target.script_snapshot:
-                        updates["script_content"] = target.script_snapshot
-                    if updates:
-                        await tc_repo.update(tid, updates)
+                    # Atomic + reversible restore: DB + disk + sidecar + metadata.
+                    status = await apply_version_to_test_case(db, tid, target)
 
                     new_ver = await ver_repo.create_version({
                         "test_id": tid,
@@ -191,6 +352,7 @@ async def rollback_test(test_id: str, body: RollbackRequest | None = None):
                         ),
                         "gherkin_snapshot": target.gherkin_snapshot or "",
                         "script_snapshot": target.script_snapshot or "",
+                        "metadata_snapshot": getattr(target, "metadata_snapshot", None),
                         "changed_by": "arta-rollback",
                     })
 
@@ -198,7 +360,8 @@ async def rollback_test(test_id: str, body: RollbackRequest | None = None):
                         "test_id": tid,
                         "rolled_back_to_version": target.version,
                         "new_version": _to_dict(new_ver),
-                        "applied": list(updates.keys()),
+                        "applied": status.get("applied", []),
+                        "restored": status,
                     }
 
     if error:
@@ -223,14 +386,8 @@ async def revert_to_version(test_id: str, version: int):
             if not target:
                 raise HTTPException(404, f"Version {version} not found for {tid}")
 
-            # Update test case with version's content
-            updates: dict = {}
-            if target.gherkin_snapshot:
-                updates["gherkin_scenario"] = target.gherkin_snapshot
-            if target.script_snapshot:
-                updates["script_content"] = target.script_snapshot
-            if updates:
-                await tc_repo.update(tid, updates)
+            # Atomic + reversible restore: DB + disk + sidecar + metadata.
+            status = await apply_version_to_test_case(db, tid, target)
 
             # Create new version entry recording the revert
             new_ver = await ver_repo.create_version({
@@ -238,6 +395,7 @@ async def revert_to_version(test_id: str, version: int):
                 "change_reason": f"Reverted to version {version}",
                 "gherkin_snapshot": target.gherkin_snapshot or "",
                 "script_snapshot": target.script_snapshot or "",
+                "metadata_snapshot": getattr(target, "metadata_snapshot", None),
                 "changed_by": "arta-agent",
             })
 
@@ -245,6 +403,7 @@ async def revert_to_version(test_id: str, version: int):
                 "reverted_to": version,
                 "new_version": _to_dict(new_ver),
                 "test_id": tid,
+                "restored": status,
             }
 
     # Mock fallback
@@ -263,3 +422,59 @@ async def revert_to_version(test_id: str, version: int):
     }
     versions.insert(0, entry)
     return {"reverted_to": version, "new_version": entry, "test_id": tid}
+
+
+@versions_router.post("/requirements/{req_id}/restore-previous-generation",
+                      dependencies=[Depends(_require_api_key)])
+async def restore_previous_generation(req_id: str):
+    """One-click "undo my force-generate": restore EVERY test case of a
+    requirement to the state captured just before the LAST force-regen (its most
+    recent `pre_regen:` snapshot). Reuses the same atomic revert helper as the
+    per-test path (DB + disk + sidecar + metadata). Fail-open per test — one
+    unrevertable test does not abort the batch (reported in `skipped`)."""
+    from ..db_adapter import try_db
+
+    req = req_id.upper()
+    async with try_db() as db:
+        if not db:
+            raise HTTPException(503, "Database unavailable — restore requires version history")
+        from ...db.repository import TestCaseVersionRepo
+        ver_repo = TestCaseVersionRepo(db)
+
+        # Enumerate the requirement's current test_ids: by the requirement FK AND
+        # by test_id shape (Newman/k6 rows can have a NULL requirement_id).
+        tc_pat = req.replace("REQ-", "TC-")
+        rows = (await db.execute(_sql(
+            "SELECT DISTINCT test_id FROM test_cases WHERE "
+            "requirement_id = (SELECT id FROM requirements WHERE req_id = :req LIMIT 1) "
+            "OR test_id LIKE :p1 OR test_id LIKE :p2 OR test_id LIKE :p3"),
+            {"req": req, "p1": f"{tc_pat}-%", "p2": f"{req}-%", "p3": f"{req}%"})).all()
+        test_ids = sorted({r.test_id for r in rows})
+
+        reverted, skipped = [], []
+        for tid in test_ids:
+            try:
+                versions = await ver_repo.list_versions(tid)  # desc by version
+                target = next((v for v in versions
+                               if (v.change_reason or "").startswith("pre_regen:")), None)
+                if not target:
+                    skipped.append({"test_id": tid, "reason": "no pre_regen snapshot"})
+                    continue
+                status = await apply_version_to_test_case(db, tid, target)
+                await ver_repo.create_version({
+                    "test_id": tid,
+                    "change_reason": f"Restored previous generation (v{target.version})",
+                    "gherkin_snapshot": target.gherkin_snapshot or "",
+                    "script_snapshot": target.script_snapshot or "",
+                    "metadata_snapshot": getattr(target, "metadata_snapshot", None),
+                    "changed_by": "arta-restore",
+                })
+                reverted.append({"test_id": tid, "to_version": target.version, "restored": status})
+            except Exception as exc:
+                log.warning("restore-previous-generation: %s skipped: %s", tid, exc)
+                skipped.append({"test_id": tid, "reason": f"{type(exc).__name__}: {exc}"})
+
+        if not test_ids:
+            raise HTTPException(404, f"No test cases found for requirement {req}")
+        return {"requirement_id": req, "reverted": len(reverted),
+                "skipped": len(skipped), "reverted_tests": reverted, "skipped_tests": skipped}
