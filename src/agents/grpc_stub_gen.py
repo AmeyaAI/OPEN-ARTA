@@ -74,10 +74,20 @@ def compile_protos(proto_files: list[dict], out_dir: str | Path) -> dict:
     with tempfile.TemporaryDirectory() as _root:
         root = Path(_root)
         staged: list[tuple[str, str]] = []  # (basename, stem)
+        _seen_names: set[str] = set()
         for pf in proto_files:
             name = Path(pf.get("path") or "").name
             if not name.endswith(".proto") or not pf.get("text"):
                 continue
+            # Protos are staged flat by basename (so cross-file `import "x.proto"`
+            # resolves). Two protos sharing a basename would silently overwrite —
+            # keep the first, skip + record the collision (fail-loud, not silent).
+            if name in _seen_names:
+                errors.append(f"basename_collision_skipped:{pf.get('path') or name}")
+                log.warning("compile_protos: duplicate basename %r (%s) — kept the "
+                            "first, skipped this one", name, pf.get("path"))
+                continue
+            _seen_names.add(name)
             (root / name).write_text(pf["text"])
             staged.append((name, name[:-len(".proto")]))
         if not staged:
