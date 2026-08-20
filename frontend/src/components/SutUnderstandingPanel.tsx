@@ -155,6 +155,11 @@ export default function SutUnderstandingPanel({ projectId }: { projectId: string
                 {' · '}<span style={{ color: '#38bdf8' }}>◆ {t.data_object_count} Data-linked{(t.entities_under_test?.length ?? 0) > 0 ? ` (${t.entities_under_test!.length} entities)` : ''}</span>
               </span>
             )}
+            {(t.workflow_linked_count ?? 0) > 0 && (
+              <span title="Tests linked to a captured business workflow — an ordered API sequence with data dependencies (AC→Workflow spine)">
+                {' · '}<span style={{ color: '#a78bfa' }}>⛓ {t.workflow_linked_count} Workflow-linked</span>
+              </span>
+            )}
           </div>
           <Bar dist={t.grounded_by || {}} />
         </div>

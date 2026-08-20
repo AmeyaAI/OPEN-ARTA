@@ -14016,6 +14016,45 @@ async def _persist_run_to_db(run_id: str, project_id: str | None) -> None:
     try:
         report_dir = ARTIFACTS_DIR / f"{run_id}-report"
         report_dir.mkdir(parents=True, exist_ok=True)
+        # Trace-panel per-test lineage — enrich result rows with the per-test spine
+        # stamps (source_components / data_objects / workflows) that live in
+        # test_cases.metadata (gen-time), so _lineage_panel can draw the full chain
+        # Req→AC→Workflow→Code→API→Data→TC→Script. The `ac_id` thread does the same
+        # for AC; here we add the newer spine dimensions. Fail-open — a fetch error
+        # must not fail the report. Killswitch ARTA_TRACE_LINEAGE_SPINE_DISABLE.
+        if os.environ.get("ARTA_TRACE_LINEAGE_SPINE_DISABLE") != "1":
+            try:
+                _tids = sorted({str(r.get("test_id")) for r in test_results
+                                if isinstance(r, dict) and r.get("test_id")})
+                if _tids:
+                    async with async_session_factory() as _spine_db:
+                        _spine_rows = (await _spine_db.execute(text(
+                            "SELECT test_id, metadata->'source_components' AS sc, "
+                            "metadata->'data_objects' AS do, metadata->'workflows' AS wf "
+                            "FROM test_cases WHERE test_id = ANY(:tids)"),
+                            {"tids": _tids})).all()
+                    _spine = {r.test_id: {"source_components": r.sc,
+                                          "data_objects": r.do, "workflows": r.wf}
+                              for r in _spine_rows}
+                    for _r in test_results:
+                        _s = _spine.get(str(_r.get("test_id"))) if isinstance(_r, dict) else None
+                        if not _s:
+                            continue
+                        _m = _r.get("metadata")
+                        if isinstance(_m, str):
+                            try:
+                                _m = json.loads(_m)
+                            except Exception:
+                                _m = {}
+                        if not isinstance(_m, dict):
+                            _m = {}
+                        for _k, _v in _s.items():
+                            if _v and not _m.get(_k):   # never override a live stamp
+                                _m[_k] = _v
+                        _r["metadata"] = _m
+            except Exception as _spine_exc:
+                log.debug("trace lineage spine enrichment skipped for run %s: %s",
+                          run_id, _spine_exc)
         summary_html = _render_unified_report(run_id, run_data, test_results)
         (report_dir / "summary.html").write_text(summary_html, encoding="utf-8")
         # When Playwright didn't run (Newman/k6/etc.-only run) there is no
@@ -14400,6 +14439,38 @@ def _native_report_file(run_id: str, tool: str) -> "str | None":
     return None
 
 
+def _spine_lineage_rows(meta: dict) -> list[str]:
+    """The per-test spine rows for the run-report Trace panel — the charter chain
+    Req→AC→WORKFLOW→CODE→API→DATA→TC→Script. Reads `workflows` / `source_components`
+    / `data_objects` from a test's metadata (enriched from test_cases.metadata at
+    report render) and returns HTML row strings, one per PRESENT stamp (defensive:
+    nothing for a missing stamp). Deterministic; module-level for unit-testing."""
+    import html as _h
+    rows: list[str] = []
+    if not isinstance(meta, dict):
+        return rows
+    wf = meta.get("workflows") or {}
+    if wf.get("workflow_count"):
+        top = (wf.get("workflows") or [{}])[0]
+        txt = f'{wf["workflow_count"]} workflow(s)'
+        if top.get("endpoint_count"):
+            txt += f' · top chain {top.get("matched_count", 0)}/{top.get("endpoint_count")} endpoints'
+        rows.append(f'<span class="tk">Workflow</span><span class="tv">{_h.escape(txt)}</span>')
+    sc = meta.get("source_components") or {}
+    if sc.get("component_count"):
+        files = sorted({c.get("file") for c in (sc.get("components") or []) if c.get("file")})
+        rows.append('<span class="tk">Code</span><span class="tv">'
+                    + _h.escape("; ".join(files[:3]))
+                    + (f' +{len(files) - 3}' if len(files) > 3 else '') + '</span>')
+    do = meta.get("data_objects") or {}
+    if do.get("object_count"):
+        ents = do.get("entities") or []
+        rows.append('<span class="tk">Data</span><span class="tv">'
+                    + _h.escape(", ".join(ents[:6]))
+                    + (f' +{len(ents) - 6}' if len(ents) > 6 else '') + '</span>')
+    return rows
+
+
 def _render_unified_report(run_id: str, run_data: dict, test_results: list[dict]) -> str:
     """F20-28: Render an aggregated HTML summary report covering all 6
     tool families (playwright/newman/k6/zap/axe/pytest). Linked-from-by
@@ -14725,6 +14796,10 @@ def _render_unified_report(run_id: str, run_data: dict, test_results: list[dict]
                         f'{len(_acs)} AC — {_html.escape(_lst)}</span>')
         else:
             rows.append('<span class="tk">Acceptance</span><span class="tv">—</span>')
+
+        # Per-test spine rows (Workflow / Code / Data), enriched from
+        # test_cases.metadata at report render — the charter chain between AC and TC.
+        rows.extend(_spine_lineage_rows(meta))
 
         # Test Case — canonical TC only when the row actually linked to one.
         _tcid = str(tr.get("test_id") or "")

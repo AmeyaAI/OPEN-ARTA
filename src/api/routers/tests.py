@@ -5608,7 +5608,9 @@ async def generate_tests(body: GenerateRequest, request: Request):
             from ...agents.traceability_gate import (
                 derive_grounded_by, prune_traceability,
                 source_component_stamp as _sc_stamp,
-                data_object_stamp as _do_stamp)
+                data_object_stamp as _do_stamp,
+                build_chain_index as _build_chain_index,
+                workflow_stamp as _wf_stamp)
             _cap_by_key = {
                 f"{e.get('method')}:{e.get('path')}": e
                 for e in (_captured or []) if isinstance(e, dict) and e.get('path')
@@ -5637,6 +5639,16 @@ async def generate_tests(body: GenerateRequest, request: Request):
                         _entity_map = _oei(json.loads(_op2.read_text()))
                 except Exception as _eidx_exc:
                     log.debug("data-object stamp: entity index load skipped: %s", _eidx_exc)
+            # Business-Workflow dimension: build the captured-CallChain index ONCE
+            # (endpoint_key → chains) so each test can be linked to the business
+            # workflow(s) it exercises — O(matched_keys) per test, not O(chains).
+            _chain_index = {}
+            if _pid and os.environ.get("ARTA_TRACEABILITY_WORKFLOW_DISABLE") != "1":
+                try:
+                    from ...agents.api_discovery import load_chains as _load_chains
+                    _chain_index = _build_chain_index(_load_chains(_pid))
+                except Exception as _cidx_exc:
+                    log.debug("workflow stamp: chain index load skipped: %s", _cidx_exc)
             # R330 P1d — the gen-time source-grounding status (fail-loud): stamp it
             # per test so it persists with the gate verdicts and reaches the panel.
             _src_grounding = (getattr(auto_agent, "_r330_source_grounding_status", None)
@@ -5706,6 +5718,13 @@ async def generate_tests(body: GenerateRequest, request: Request):
                     if _do["object_count"]:
                         _res["data_objects"] = _do
                         _t["metadata"]["data_objects"] = _do
+                # Business-Workflow dimension: which captured CallChain(s) (ordered
+                # API sequences w/ data deps) this test's endpoints belong to.
+                if _chain_index:
+                    _wf = _wf_stamp(_mk, _chain_index)
+                    if _wf["workflow_count"]:
+                        _res["workflows"] = _wf
+                        _t["metadata"]["workflows"] = _wf
                 if _code_api_links:
                     _t["metadata"]["code_api_links"] = _code_api_links
                 if not _res["traceable"]:
@@ -5760,6 +5779,8 @@ async def generate_tests(body: GenerateRequest, request: Request):
                             _patch["source_components"] = _md["source_components"]
                         if _md.get("data_objects"):
                             _patch["data_objects"] = _md["data_objects"]
+                        if _md.get("workflows"):
+                            _patch["workflows"] = _md["workflows"]
                         await _s_r330.execute(_sqltext_r330(
                             "UPDATE test_cases SET metadata = COALESCE(metadata,'{}'::jsonb) "
                             "|| CAST(:patch AS jsonb), updated_at = NOW() "
