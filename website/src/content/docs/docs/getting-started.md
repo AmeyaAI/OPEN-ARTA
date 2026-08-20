@@ -22,7 +22,7 @@ cloud account, no data leaving your network.
 ## Quickstart
 
 ```bash
-git clone https://github.com/gangadharneeli/OPEN-ARTA.git
+git clone https://github.com/Dpod-Labs-Private-Limited/OPEN-ARTA.git
 cd OPEN-ARTA
 cp .env.example .env          # defaults are Ollama-local; add keys only if you want cloud LLMs
 docker compose up -d

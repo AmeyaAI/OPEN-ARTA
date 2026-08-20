@@ -5,7 +5,7 @@ description: The full ARTA installation — Docker Compose services, environment
 
 This page covers everything the [quickstart](/OPEN-ARTA/docs/getting-started/)
 glossed over. The single source of truth for configuration is
-[`.env.example`](https://github.com/gangadharneeli/OPEN-ARTA/blob/main/.env.example)
+[`.env.example`](https://github.com/Dpod-Labs-Private-Limited/OPEN-ARTA/blob/main/.env.example)
 in the repository — every variable is documented inline there.
 
 ## What `docker compose up -d` starts
@@ -57,7 +57,7 @@ data-residency violation.
 
 ARTA sends an anonymous, bucketed usage ping by default. Every field is
 documented in
-[docs/TELEMETRY.md](https://github.com/gangadharneeli/OPEN-ARTA/blob/main/docs/TELEMETRY.md),
+[docs/TELEMETRY.md](https://github.com/Dpod-Labs-Private-Limited/OPEN-ARTA/blob/main/docs/TELEMETRY.md),
 free-form strings are structurally impossible, and:
 
 ```bash
@@ -70,6 +70,6 @@ makes air-gapped deployment a supported configuration, not a workaround.
 ## Production self-hosting
 
 For sizing, deployment profiles, and security hardening, read the
-[self-hosting infrastructure spec](https://github.com/gangadharneeli/OPEN-ARTA/blob/main/docs/SELF_HOSTING_INFRASTRUCTURE.md)
-and the [runbook](https://github.com/gangadharneeli/OPEN-ARTA/blob/main/docs/RUNBOOK.md).
+[self-hosting infrastructure spec](https://github.com/Dpod-Labs-Private-Limited/OPEN-ARTA/blob/main/docs/SELF_HOSTING_INFRASTRUCTURE.md)
+and the [runbook](https://github.com/Dpod-Labs-Private-Limited/OPEN-ARTA/blob/main/docs/RUNBOOK.md).
 The repo also ships `docker-compose.prod.yml` as a production-oriented overlay.

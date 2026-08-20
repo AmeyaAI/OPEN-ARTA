@@ -4,7 +4,7 @@ description: Every ARTA configuration surface — environment variables for LLM 
 ---
 
 All configuration is environment variables, and the single source of truth is
-[`.env.example`](https://github.com/gangadharneeli/OPEN-ARTA/blob/main/.env.example)
+[`.env.example`](https://github.com/Dpod-Labs-Private-Limited/OPEN-ARTA/blob/main/.env.example)
 — every variable is documented inline where it is defined. Copy it and edit:
 
 ```bash
@@ -52,7 +52,7 @@ Never commit `.env` to source control.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `ARTA_TELEMETRY` | `1` | `0` = zero network calls (air-gap safe); fields documented in [docs/TELEMETRY.md](https://github.com/gangadharneeli/OPEN-ARTA/blob/main/docs/TELEMETRY.md) |
+| `ARTA_TELEMETRY` | `1` | `0` = zero network calls (air-gap safe); fields documented in [docs/TELEMETRY.md](https://github.com/Dpod-Labs-Private-Limited/OPEN-ARTA/blob/main/docs/TELEMETRY.md) |
 | `ARTA_TELEMETRY_EXTENDED` | off | Opt-in Tier-2 events |
 
 ### Integrations
