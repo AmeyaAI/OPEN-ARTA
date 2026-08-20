@@ -40,6 +40,19 @@ def test_traversal_guard_refuses_escape():
     assert _resolve_under_automation("src/automation/../../../../tmp/evil") is None
 
 
+def test_snapshot_hash_includes_metadata_and_scaffold():
+    # M4 — the dedup gate must fold metadata + scaffold, else a metadata-only or
+    # priority/tags-only change is skipped as a "duplicate" and the resurrection
+    # scaffold goes stale.
+    from src.api.routers.tests_versions import _snapshot_hash
+    base = _snapshot_hash("g", "s", {"a": 1}, {"priority": "P2"})
+    assert _snapshot_hash("g", "s", {"a": 2}, {"priority": "P2"}) != base   # metadata-only
+    assert _snapshot_hash("g", "s", {"a": 1}, {"priority": "P0"}) != base   # scaffold-only
+    assert _snapshot_hash("g", "s", {"a": 1}, {"priority": "P2"}) == base   # identical → dedup
+    # key order is stable (dict serialization sorted)
+    assert _snapshot_hash("g", "s", {"a": 1, "b": 2}, {}) == _snapshot_hash("g", "s", {"b": 2, "a": 1}, {})
+
+
 def test_version_model_carries_resurrection_columns():
     # guards migration↔model drift: revert restores the traceability spine
     # (metadata_snapshot) and can RESURRECT a deleted row (row_snapshot).

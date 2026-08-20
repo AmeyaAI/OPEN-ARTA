@@ -21,6 +21,8 @@ it's excluded from dispatch (NOT a skip; not part of the denominator).
 """
 from __future__ import annotations
 
+import ast
+import builtins as _builtins
 import json
 import logging
 import os         # R140.A — killswitch env var
@@ -5057,6 +5059,169 @@ def validate_k6_grounded(
 # ────────────────────────────────────────────────────────────────────────────
 # Pytest (analytics)
 # ────────────────────────────────────────────────────────────────────────────
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# R123.A parity for the pytest/analytics lane — undefined-symbol validator.
+# The pytest gen loop ran syntax (ast.parse) + assertion-value-drift only; a
+# mangled call (e.g. `assert_intNone_consistent`) survived gen-time and was a
+# NameError waiting to fire. Playwright has R123.A for exactly this; pytest had
+# no equivalent. This closes the gap AT THE SOURCE (gen-time), not post-hoc lint.
+# ────────────────────────────────────────────────────────────────────────────
+
+_PY_BUILTINS = frozenset(dir(_builtins)) | {
+    "__name__", "__file__", "__doc__", "self", "cls", "__class__", "__init__",
+}
+
+
+class _DeclaredCollector(ast.NodeVisitor):
+    """Collect EVERY name bound anywhere in the module (imports, def/class,
+    assignment targets, params, for/with/except/comprehension targets,
+    global/nonlocal). Conservative by design: a name bound in ANY scope counts as
+    declared, so we only ever flag names that appear NOWHERE (typos / mangled
+    symbols) — never a legitimately-scoped name (no scoping false positives)."""
+
+    def __init__(self):
+        self.declared: set[str] = set()
+
+    def _bind(self, name):
+        if name:
+            self.declared.add(name)
+
+    def _bind_args(self, args):
+        for a in (*args.posonlyargs, *args.args, *args.kwonlyargs):
+            self._bind(a.arg)
+        if args.vararg:
+            self._bind(args.vararg.arg)
+        if args.kwarg:
+            self._bind(args.kwarg.arg)
+
+    def visit_Import(self, node):
+        for a in node.names:
+            self._bind((a.asname or a.name).split(".")[0])
+
+    def visit_ImportFrom(self, node):
+        for a in node.names:
+            if a.name != "*":
+                self._bind(a.asname or a.name)
+
+    def visit_FunctionDef(self, node):
+        self._bind(node.name)
+        self._bind_args(node.args)
+        self.generic_visit(node)
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+    def visit_ClassDef(self, node):
+        self._bind(node.name)
+        self.generic_visit(node)
+
+    def visit_Lambda(self, node):
+        self._bind_args(node.args)
+        self.generic_visit(node)
+
+    def visit_Name(self, node):
+        if isinstance(node.ctx, (ast.Store, ast.Del)):
+            self._bind(node.id)
+        self.generic_visit(node)
+
+    def visit_Global(self, node):
+        for n in node.names:
+            self._bind(n)
+
+    visit_Nonlocal = visit_Global
+
+    def visit_ExceptHandler(self, node):
+        self._bind(node.name)
+        self.generic_visit(node)
+
+
+_ARTA_RUNTIME_EXPORTS: set[str] | None = None
+
+
+def _arta_runtime_exports() -> set[str]:
+    """Statically-parsed top-level names of the arta_runtime package (no import,
+    so it works at gen time). Used to catch `from arta_runtime import <typo>` —
+    an ImportError bare undefined-name checks (and ruff F821) miss."""
+    global _ARTA_RUNTIME_EXPORTS
+    if _ARTA_RUNTIME_EXPORTS is not None:
+        return _ARTA_RUNTIME_EXPORTS
+    names: set[str] = set()
+    try:
+        p = (Path(__file__).resolve().parents[1] / "automation" / "python_tests"
+             / "arta_runtime" / "__init__.py")
+        tree = ast.parse(p.read_text(encoding="utf-8"))
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.add(node.name)
+            elif isinstance(node, ast.Assign):
+                for tg in node.targets:
+                    if isinstance(tg, ast.Name):
+                        names.add(tg.id)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                for a in node.names:
+                    if a.name != "*":
+                        names.add(a.asname or a.name.split(".")[0])
+    except Exception:
+        pass  # unavailable → skip the import-mismatch check (bare-undef still runs)
+    _ARTA_RUNTIME_EXPORTS = names
+    return names
+
+
+def validate_pytest_undefined_symbols(content: str) -> list[GroundingViolation]:
+    """R123.A parity — flag bare undefined names (NameError) and bad
+    `from arta_runtime import` names (ImportError) in generated pytest, at gen
+    time. Killswitch ARTA_PYTEST_UNDEF_DISABLE=1."""
+    out: list[GroundingViolation] = []
+    if not content or os.environ.get("ARTA_PYTEST_UNDEF_DISABLE") == "1":
+        return out
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        return out  # syntax is caught upstream (_validate_pytest_code)
+    coll = _DeclaredCollector()
+    coll.visit(tree)
+    declared = coll.declared | _PY_BUILTINS
+
+    # A `from X import *` brings in unknown names — the bare-undefined check would
+    # false-positive on them, so skip it when a star-import is present. The
+    # import-mismatch check (2) is unaffected and still runs.
+    _has_star = any(
+        isinstance(n, ast.ImportFrom) and any(a.name == "*" for a in n.names)
+        for n in ast.walk(tree)
+    )
+
+    # (1) bare undefined names — used/called but bound nowhere.
+    seen: set[str] = set()
+    for node in ast.walk(tree) if not _has_star else []:
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            nm = node.id
+            if nm not in declared and nm not in seen:
+                seen.add(nm)
+                out.append(GroundingViolation(
+                    tool="pytest", kind="undefined_symbol", symbol=nm,
+                    location=f"line {getattr(node, 'lineno', '?')}",
+                    hint=(f"`{nm}` is used but never imported or defined — a NameError "
+                          f"at runtime. Only call helpers you import (e.g. from arta_runtime) "
+                          f"or define; do not invent names."),
+                ))
+
+    # (2) import-mismatch — `from arta_runtime import <name>` that isn't exported.
+    exports = _arta_runtime_exports()
+    if exports:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[-1] == "arta_runtime":
+                for a in node.names:
+                    if a.name != "*" and a.name not in exports and a.name not in seen:
+                        seen.add(a.name)
+                        out.append(GroundingViolation(
+                            tool="pytest", kind="undefined_import", symbol=a.name,
+                            location=f"line {getattr(node, 'lineno', '?')}",
+                            hint=(f"`{a.name}` is imported from arta_runtime but that "
+                                  f"module does not export it — an ImportError at runtime. "
+                                  f"Use an actual arta_runtime helper."),
+                        ))
+    return out
 
 
 def validate_pytest_grounded(
