@@ -40,6 +40,15 @@ def test_traversal_guard_refuses_escape():
     assert _resolve_under_automation("src/automation/../../../../tmp/evil") is None
 
 
+def test_version_model_carries_resurrection_columns():
+    # guards migration↔model drift: revert restores the traceability spine
+    # (metadata_snapshot) and can RESURRECT a deleted row (row_snapshot).
+    from src.db.models import TestCaseVersion
+    cols = TestCaseVersion.__table__.columns.keys()
+    assert "metadata_snapshot" in cols
+    assert "row_snapshot" in cols
+
+
 @pytest.mark.asyncio
 async def test_snapshot_killswitch_and_empty_shortcircuit():
     # both must return 0 WITHOUT touching the (None) db — proves the guard runs first

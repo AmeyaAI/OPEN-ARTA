@@ -718,6 +718,7 @@ CREATE TABLE IF NOT EXISTS test_case_versions (
     gherkin_snapshot TEXT,
     script_snapshot  TEXT,
     metadata_snapshot JSONB,                 -- per-test traceability spine at snapshot time
+    row_snapshot     JSONB,                  -- full row scaffold (title/tool/priority/...) to RESURRECT a deleted test
     changed_by       TEXT DEFAULT 'arta-agent',
     created_at       TIMESTAMPTZ DEFAULT now(),
     UNIQUE(test_id, version)
