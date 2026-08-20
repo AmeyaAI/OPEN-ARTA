@@ -5,7 +5,7 @@ description: The specialized agents that make up ARTA's pipeline — strategy, A
 
 ARTA is not one prompt in a loop. It is a pipeline of specialized agents —
 plain Python classes under
-[`src/agents/`](https://github.com/gangadharneeli/OPEN-ARTA/tree/main/src/agents)
+[`src/agents/`](https://github.com/AmeyaAI/OPEN-ARTA/tree/main/src/agents)
 — each owning one responsibility, with deterministic validators between the
 LLM and anything that ships.
 

@@ -45,7 +45,7 @@ Prerequisite: [Ollama](https://ollama.com) running locally (`ollama pull qwen2.5
 or any supported cloud-LLM key.
 
 ```bash
-git clone https://github.com/gangadharneeli/OPEN-ARTA.git
+git clone https://github.com/AmeyaAI/OPEN-ARTA.git
 cd OPEN-ARTA
 cp .env.example .env          # defaults are Ollama-local; add keys only if you want cloud LLMs
 docker compose up -d

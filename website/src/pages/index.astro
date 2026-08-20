@@ -2,7 +2,7 @@
 import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
-const gh = 'https://github.com/gangadharneeli/OPEN-ARTA';
+const gh = 'https://github.com/AmeyaAI/OPEN-ARTA';
 ---
 
 <StarlightPage
@@ -217,7 +217,7 @@ trace: REQ-101 → AC-2 → req-101.collection → run 0142</code></pre>
 				<div class="arta-term">
 					<div class="arta-term-bar"><i></i><i></i><i></i>&nbsp;quickstart</div>
 					<pre><code><span class="t-cmt"># prerequisite: Ollama (ollama pull qwen2.5:32b) — or a cloud-LLM key</span>
-<span class="t-cmd">git clone https://github.com/gangadharneeli/OPEN-ARTA.git</span>
+<span class="t-cmd">git clone https://github.com/AmeyaAI/OPEN-ARTA.git</span>
 <span class="t-cmd">cd OPEN-ARTA</span>
 <span class="t-cmd">cp .env.example .env</span>
 <span class="t-cmd">docker compose up -d</span>
@@ -349,7 +349,7 @@ quality gate: <span class="t-fail">FAIL</span> <span class="t-dim">(P0 regressio
 		try {
 			let d = JSON.parse(sessionStorage.getItem('arta-gh') || 'null');
 			if (!d) {
-				const r = await fetch('https://api.github.com/repos/gangadharneeli/OPEN-ARTA');
+				const r = await fetch('https://api.github.com/repos/AmeyaAI/OPEN-ARTA');
 				if (!r.ok) return;
 				d = await r.json();
 				sessionStorage.setItem('arta-gh', JSON.stringify({ s: d.stargazers_count, f: d.forks_count }));

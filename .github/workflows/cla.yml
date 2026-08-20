@@ -24,6 +24,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           path-to-signatures: signatures/cla.json
-          path-to-document: https://github.com/gangadharneeli/OPEN-ARTA/blob/main/docs/CLA.md
+          path-to-document: https://github.com/AmeyaAI/OPEN-ARTA/blob/main/docs/CLA.md
           branch: cla-signatures
           allowlist: dependabot[bot]

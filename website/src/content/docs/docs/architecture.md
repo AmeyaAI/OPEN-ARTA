@@ -6,7 +6,7 @@ description: How ARTA is put together — the FastAPI engine, agent pipeline, da
 ARTA is a self-hosted stack: a Python engine orchestrating specialized agents
 over shared stores, dispatching external test runtimes, and reporting through
 a quality gate. The full design document is
-[ARTA_ARCHITECTURE.md](https://github.com/gangadharneeli/OPEN-ARTA/blob/main/ARTA_ARCHITECTURE.md)
+[ARTA_ARCHITECTURE.md](https://github.com/AmeyaAI/OPEN-ARTA/blob/main/ARTA_ARCHITECTURE.md)
 in the repository; this page is the map.
 
 ## The shape of the system
