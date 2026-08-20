@@ -14030,11 +14030,13 @@ async def _persist_run_to_db(run_id: str, project_id: str | None) -> None:
                     async with async_session_factory() as _spine_db:
                         _spine_rows = (await _spine_db.execute(text(
                             "SELECT test_id, metadata->'source_components' AS sc, "
-                            "metadata->'data_objects' AS do, metadata->'workflows' AS wf "
+                            "metadata->'data_objects' AS do, metadata->'workflows' AS wf, "
+                            "metadata->'code_api_links' AS cal "
                             "FROM test_cases WHERE test_id = ANY(:tids)"),
                             {"tids": _tids})).all()
                     _spine = {r.test_id: {"source_components": r.sc,
-                                          "data_objects": r.do, "workflows": r.wf}
+                                          "data_objects": r.do, "workflows": r.wf,
+                                          "code_api_links": r.cal}
                               for r in _spine_rows}
                     for _r in test_results:
                         _s = _spine.get(str(_r.get("test_id"))) if isinstance(_r, dict) else None
@@ -14449,6 +14451,14 @@ def _spine_lineage_rows(meta: dict) -> list[str]:
     rows: list[str] = []
     if not isinstance(meta, dict):
         return rows
+    cal = meta.get("code_api_links") or []
+    if isinstance(cal, list) and cal:
+        _routes = sorted({str(l.get("fe_route")) for l in cal
+                          if isinstance(l, dict) and l.get("fe_route")})
+        if _routes:
+            rows.append('<span class="tk">UI</span><span class="tv">'
+                        + _h.escape("; ".join(_routes[:3]))
+                        + (f' +{len(_routes) - 3}' if len(_routes) > 3 else '') + '</span>')
     wf = meta.get("workflows") or {}
     if wf.get("workflow_count"):
         top = (wf.get("workflows") or [{}])[0]

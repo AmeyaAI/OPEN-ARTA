@@ -8,8 +8,9 @@ def _joined(meta):
     return "\n".join(_spine_lineage_rows(meta))
 
 
-def test_all_three_spine_rows_render_from_stamps():
+def test_all_spine_rows_render_from_stamps():
     meta = {
+        "code_api_links": [{"fe_route": "/orders/:id", "endpoint_key": "GET:/x"}],
         "workflows": {"workflow_count": 2, "workflows": [
             {"chain_id": "c1", "endpoint_count": 3, "matched_count": 2}]},
         "source_components": {"component_count": 1, "components": [
@@ -17,10 +18,11 @@ def test_all_three_spine_rows_render_from_stamps():
         "data_objects": {"object_count": 1, "entities": ["OrderDto"]},
     }
     html = _joined(meta)
+    assert "UI" in html and "/orders/:id" in html
     assert "Workflow" in html and "2 workflow(s)" in html and "2/3 endpoints" in html
     assert "Code" in html and "svc/Handler.java" in html
     assert "Data" in html and "OrderDto" in html
-    assert len(_spine_lineage_rows(meta)) == 3
+    assert len(_spine_lineage_rows(meta)) == 4          # UI + Workflow + Code + Data
 
 
 def test_rows_absent_when_stamp_missing_or_empty():

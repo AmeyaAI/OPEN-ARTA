@@ -5725,8 +5725,17 @@ async def generate_tests(body: GenerateRequest, request: Request):
                     if _wf["workflow_count"]:
                         _res["workflows"] = _wf
                         _t["metadata"]["workflows"] = _wf
+                # UI-component / FE-route dimension (charter "which UI components
+                # are involved"): filter the requirement's FE→BE links to the ones
+                # whose endpoint THIS test exercises — per-test, mirroring the
+                # source/data/workflow stamps (was the whole unfiltered req list).
                 if _code_api_links:
-                    _t["metadata"]["code_api_links"] = _code_api_links
+                    _mk_set = set(_mk)
+                    _cal = [l for l in _code_api_links
+                            if isinstance(l, dict) and l.get("endpoint_key") in _mk_set]
+                    if _cal:
+                        _res["code_api_links"] = _cal
+                        _t["metadata"]["code_api_links"] = _cal
                 if not _res["traceable"]:
                     _t["metadata"]["potentially_incorrect"] = True
                     _flagged += 1
@@ -5781,6 +5790,8 @@ async def generate_tests(body: GenerateRequest, request: Request):
                             _patch["data_objects"] = _md["data_objects"]
                         if _md.get("workflows"):
                             _patch["workflows"] = _md["workflows"]
+                        if _md.get("code_api_links"):
+                            _patch["code_api_links"] = _md["code_api_links"]
                         await _s_r330.execute(_sqltext_r330(
                             "UPDATE test_cases SET metadata = COALESCE(metadata,'{}'::jsonb) "
                             "|| CAST(:patch AS jsonb), updated_at = NOW() "
