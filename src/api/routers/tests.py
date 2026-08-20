@@ -4923,7 +4923,10 @@ async def generate_tests(body: GenerateRequest, request: Request):
                     session, [te["id"] for te in generated_tests],
                     batch_id="sync-" + _dt.now(_tz.utc).strftime("%Y%m%dT%H%M%SZ"))
             except Exception:
-                pass
+                # Fail-open (never block persistence) but LOUD — silent here means
+                # the prior gen's history was not saved before the UPSERT overwrote it.
+                log.error("sync-persist: pre-UPSERT snapshot FAILED — prior versions "
+                          "may be unrecoverable", exc_info=True)
             for te in generated_tests:
                 # Gap-1.2: Persist traceability + analytics fields so they survive container restart.
                 # Columns added by migration 002_traceability.sql.
@@ -6638,7 +6641,13 @@ async def _generate_all_background(job_id: str, project_id: str, reqs: list, req
                     )
                 await session.commit()
         except Exception:
-            pass
+            # Loud, not silent: a failure here can leave DB test_cases stale AND
+            # diverge from the disk specs the R215 block is about to rename to
+            # .r215.bak. Surface it (per-test snapshot loss is logged inside
+            # snapshot_test_cases). Regen still proceeds (fail-open by design).
+            log.error("Force regen: snapshot/delete transaction FAILED for reqs=%s — "
+                      "DB test_cases may be stale or diverge from disk", _regen_ids,
+                      exc_info=True)
         # R215 — NON-DESTRUCTIVE disk clear: rename to `.r215.bak` (a successful
         # per-req gen overwrites the real path; a FAILED one leaves the .bak
         import glob

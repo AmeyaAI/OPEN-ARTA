@@ -7966,6 +7966,55 @@ def _r230_probe(
         return (w.split("_")[-1] or w).strip("_")
 
     _probes = 0
+
+    def _probe_extract(url: str, p: str, var: str, kw: str) -> bool:
+        """Probe one concrete list URL (GET only — R154-safe) and extract var's
+        id from the first item. Returns True if resolved. Shared by the flat pass
+        and the chained-resource pass so the extraction/caching logic lives once."""
+        nonlocal _probes
+        try:
+            r = _httpx.get(url, headers=headers, timeout=timeout_s, verify=False)
+            if r.status_code // 100 != 2:
+                return False
+            body = r.json()
+        except Exception:
+            return False
+        # R284 — resource-named list key, then the generic data/items/results/
+        # value, then the first list-of-dicts property.
+        _last_seg284 = str(p).rstrip("/").split("/")[-1]
+        _res_keys284 = [_last_seg284, _last_seg284.lower(), kw + "s", kw]
+        items = body if isinstance(body, list) else (
+            body.get("data") or body.get("items") or body.get("results")
+            or body.get("value")
+            or next((body.get(_k) for _k in _res_keys284
+                     if isinstance(body.get(_k), list)), None)
+            or (next((v for v in body.values() if isinstance(v, list) and v
+                      and isinstance(v[0], dict)), None)
+                if isinstance(body, dict) else None)
+            or [])
+        if isinstance(items, dict):
+            items = [items]
+        if not items or not isinstance(items[0], dict):
+            return False
+        first = items[0]
+        # R250 — cache the real ids this probe learned so GEN sees them next cycle.
+        try:
+            from ...agents.real_id_store import extract_real_ids, persist_real_ids
+            persist_real_ids(project_id, extract_real_ids([{
+                "method": "GET", "path": p, "status": r.status_code,
+                "response_body_sample": body, "_source": "r230_live_probe",
+            }]))
+        except Exception as _r250_exc:
+            log.debug("R250: caching R230 probe result failed: %s", _r250_exc)
+        _low = {k.lower(): v for k, v in first.items() if isinstance(v, (str, int))}
+        for cand_key in (var.lower(), var.lower().replace("_", ""),
+                         kw + "id", kw + "guid", "id", "guid", kw + "_id"):
+            if cand_key in _low and str(_low[cand_key]).strip():
+                out[var] = str(_low[cand_key])
+                log.info("R230: seeded %s=%s from LIST %s", var, str(out[var])[:12], p)
+                return True
+        return False
+
     for var in _id_vars:
         if _probes >= max_probes or var in out:
             continue
@@ -7980,18 +8029,15 @@ def _r230_probe(
             if not (p and kw in str(p).lower() and _list_shaped(str(p))):
                 continue
             _lowp = str(p).lower()
-            # R284.1 — skip static-asset / frontend-route noise that the probe
-            # captured (Next.js `/_next/static/chunks/...servers...`, bare SPA
-            # routes `/servers`). They're list-shaped + contain the keyword but
-            # are NOT the API resource list, and R230 only probes cands[:2] —
-            # so noise crowding the front starved the real API endpoint
+            # R284.1 — skip static-asset / frontend-route noise (chunks, bare SPA
+            # routes) that are list-shaped + keyword-matching but NOT the API list.
             if ("/_next/" in _lowp or "/static/" in _lowp or "chunks" in _lowp
                     or _lowp.endswith((".js", ".css", ".map", ".png", ".svg",
                                        ".ico", ".woff", ".woff2"))):
                 continue
             cands.append(str(p))
         # Prefer real API lists: versioned/`/api/` paths first, then deeper
-        # (more-specific) paths — so `/v1/regions/.../servers` beats `/servers`.
+        # (more-specific) paths.
         cands.sort(key=lambda c: (0 if _re.search(r"/v\d+/|/api/", c) else 1,
                                   -c.count("/")))
         for p in cands[:3]:
@@ -7999,58 +8045,58 @@ def _r230_probe(
                 break
             _probes += 1
             url = base_host.rstrip("/") + "/" + p.lstrip("/")
-            try:
-                r = _httpx.get(url, headers=headers, timeout=timeout_s, verify=False)
-                if r.status_code // 100 != 2:
-                    continue
-                body = r.json()
-            except Exception:
-                continue
-            # R284 — resource-named list key. Many SUTs wrap a collection under a
-            # {"clusters":[...]}, {"apiKeys":[...]}) rather than the generic
-            # data/items/results/value. Pre-R284 R230 harvested nothing from
-            # those → `{{serverId}}` stayed unresolved → whole-spec BLOCK. Try
-            # the list endpoint's last path segment (and its lowercase) as a key
-            # too, then fall back to the first list-valued property. GENERIC.
-            _last_seg284 = str(p).rstrip("/").split("/")[-1]
-            _res_keys284 = [_last_seg284, _last_seg284.lower(), kw + "s", kw]
-            items = body if isinstance(body, list) else (
-                body.get("data") or body.get("items") or body.get("results")
-                or body.get("value")
-                or next((body.get(_k) for _k in _res_keys284
-                         if isinstance(body.get(_k), list)), None)
-                or (next((v for v in body.values() if isinstance(v, list) and v
-                          and isinstance(v[0], dict)), None)
-                    if isinstance(body, dict) else None)
-                or [])
-            if isinstance(items, dict):
-                items = [items]
-            if not items or not isinstance(items[0], dict):
-                continue
-            first = items[0]
-            # R250 — CACHE what this probe just learned. Pre-R250 the real ids
-            # R230 harvests lived only in `out` and died with the run, so GEN
-            # never saw them and the LLM went on inventing `ACC-OTP-57291`.
-            # One live LIST probe per entity, cached to disk, is the cheapest
-            # real-data grounding available. Extraction-only: the auth/
-            try:
-                from ...agents.real_id_store import extract_real_ids, persist_real_ids
-                persist_real_ids(project_id, extract_real_ids([{
-                    "method": "GET", "path": p, "status": r.status_code,
-                    "response_body_sample": body, "_source": "r230_live_probe",
-                }]))
-            except Exception as _r250_exc:
-                log.debug("R250: caching R230 probe result failed: %s", _r250_exc)
-            # find a field matching the id var (exact-ish), then generic id/guid
-            _low = {k.lower(): v for k, v in first.items() if isinstance(v, (str, int))}
-            for cand_key in (var.lower(), var.lower().replace("_", ""),
-                             kw + "id", kw + "guid", "id", "guid", kw + "_id"):
-                if cand_key in _low and str(_low[cand_key]).strip():
-                    out[var] = str(_low[cand_key])
-                    log.info("R230: seeded %s=%s from LIST %s", var, str(out[var])[:12], p)
-                    break
-            if var in out:
+            if _probe_extract(url, p, var, kw):
                 break
+
+    # R330.CR — CHAINED-RESOURCE resolver (depth-1). A nested id (e.g.
+    # `collection_item_id`) lives under a LIST path with a PARENT placeholder
+    # (`/collections/{collection_id}/items`), which `_list_shaped` rejects — so
+    # the flat pass above can never reach it and it truthful-BLOCKs. Here, for a
+    # still-unresolved var, substitute placeholders from parents the flat pass
+    # ALREADY resolved (in `out`) → concrete list URL → probe → extract. Only
+    # substitutes already-known parents (no recursion, no fabricated ids); if any
+    # parent is unresolved it falls back to the existing BLOCK — never regresses.
+    # Killswitch ARTA_R330_CHAIN_RESOLVE_DISABLE=1.
+    if os.environ.get("ARTA_R330_CHAIN_RESOLVE_DISABLE") != "1":
+        def _norm_id(s: str) -> str:
+            return _re.sub(r"[^a-z0-9]", "", str(s).lower())
+        _resolved_norm = {_norm_id(k): v for k, v in out.items() if v}
+        for var in [v for v in _id_vars if v not in out]:
+            if _probes >= max_probes:
+                break
+            kw = _keyword(var)
+            pcands = []
+            for e in eps:
+                if not isinstance(e, dict) or str(e.get("method") or "GET").upper() != "GET":
+                    continue
+                p = str(e.get("path") or e.get("url") or "")
+                if not p or "{" not in p or kw not in p.lower():
+                    continue
+                _stripped = _re.sub(r"\{[^}]+\}", "", p.lower())
+                if not (any(k in _stripped for k in ("list", "search"))
+                        or _stripped.rstrip("/").split("/")[-1].endswith("s")):
+                    continue
+                pcands.append(p)
+            # fewest placeholders first (easiest to satisfy), API paths first
+            pcands.sort(key=lambda c: (c.count("{"),
+                                       0 if _re.search(r"/v\d+/|/api/", c) else 1))
+            for p in pcands[:2]:
+                if _probes >= max_probes:
+                    break
+                concrete, ok = p, True
+                for ph in _re.findall(r"\{([^}]+)\}", p):
+                    val = _resolved_norm.get(_norm_id(ph))
+                    if not val:
+                        ok = False
+                        break
+                    concrete = concrete.replace("{" + ph + "}", str(val))
+                if not ok:
+                    continue  # a parent is still unresolved → leave to truthful BLOCK
+                _probes += 1
+                url = base_host.rstrip("/") + "/" + concrete.lstrip("/")
+                if _probe_extract(url, concrete, var, kw):
+                    log.info("R230.CR: chained-resolved %s via %s", var, concrete)
+                    break
 
 
 def _r312_params_from_captured_paths(

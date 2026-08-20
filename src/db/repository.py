@@ -12,7 +12,7 @@ from typing import Any, Sequence
 
 _log = logging.getLogger("arta.repository")
 
-from sqlalchemy import func, select, update, delete
+from sqlalchemy import func, select, text, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -935,7 +935,15 @@ class TestCaseVersionRepo:
         return (await self.db.execute(q)).scalars().first()
 
     async def create_version(self, data: dict) -> TestCaseVersion:
-        # Auto-increment version number
+        # Auto-increment version number. The SELECT max()+1 then INSERT is a
+        # read-then-write race: two concurrent snapshots of the same test_id both
+        # read N and insert N+1 → UNIQUE(test_id, version) violation. Serialize
+        # per-test_id with a transaction-scoped advisory lock so the max()+1 is
+        # atomic w.r.t. other writers (released at txn commit/rollback).
+        await self.db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:t))"),
+            {"t": data["test_id"]},
+        )
         latest = await self.db.execute(
             select(func.max(TestCaseVersion.version)).where(
                 TestCaseVersion.test_id == data["test_id"]

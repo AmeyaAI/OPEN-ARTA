@@ -10,6 +10,7 @@ Endpoints:
   POST /{test_id}/versions                  — create a new version snapshot
   POST /{test_id}/rollback                  — F3-2 rollback (default: one-back)
   POST /{test_id}/versions/{version}/revert — explicit revert to a specific version
+  POST /requirements/{req_id}/restore-previous-generation — undo the last force-regen
 
 State (MOCK_VERSIONS) is shared via tests_state.py so cross-router code keeps
 working.
@@ -21,6 +22,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -42,6 +44,12 @@ versions_router = APIRouter()
 # make revert restore ALL of a script's stores (disk = canonical/executable,
 # DB script_content = UI cache, sidecar = durable, metadata = traceability).
 
+# Repo root + traversal-guard boundary, derived from THIS module's location (not
+# Path.cwd(), which silently breaks the guard if the service starts elsewhere).
+# tests_versions.py = <root>/src/api/routers/ → parents[3] is <root>.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_AUTOMATION_ROOT = (_REPO_ROOT / "src" / "automation").resolve()
+
 
 def _canonical_script(script_path: str | None, script_content_cache: str | None) -> str:
     """Canonical script = the on-disk file at script_path (source of truth /
@@ -52,12 +60,26 @@ def _canonical_script(script_path: str | None, script_content_cache: str | None)
         try:
             p = Path(script_path)
             if not p.is_absolute():
-                p = Path.cwd() / p
+                p = _REPO_ROOT / p
             if p.is_file():
                 return p.read_text(encoding="utf-8", errors="replace")
         except Exception:
             pass
     return script_content_cache or ""
+
+
+def _snapshot_hash(gherkin, script, metadata, scaffold) -> str:
+    """Stable content fingerprint for the dedup gate — includes gherkin, script,
+    the traceability metadata (what migration 014 preserves) AND the row scaffold
+    (title/priority/tags/... — what migration 015 resurrects). Hashing only
+    gherkin+script would skip a metadata-only or scaffold-only change as a
+    'duplicate' and leave the resurrection scaffold stale."""
+    payload = json.dumps({
+        "g": gherkin or "", "s": script or "",
+        "m": metadata if isinstance(metadata, dict) else None,
+        "r": scaffold if isinstance(scaffold, dict) else None,
+    }, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8", "replace")).hexdigest()
 
 
 async def snapshot_test_cases(db, test_ids, batch_id: str, *,
@@ -79,12 +101,14 @@ async def snapshot_test_cases(db, test_ids, batch_id: str, *,
             "SELECT test_id, gherkin_scenario, script_content, script_path, metadata, "
             "title, automation_tool::text AS tool, priority::text AS priority, "
             "test_type::text AS test_type, requirement_id::text AS requirement_id, "
-            "ac_id::text AS ac_id, project_id::text AS project_id, tags "
+            "ac_id::text AS ac_id, project_id::text AS project_id, tags, "
+            "is_automated, is_flaky, last_status::text AS last_status "
             "FROM test_cases WHERE test_id = ANY(:ids)"), {"ids": test_ids})).all()
         made = 0
         for r in rows:
             gherkin = r.gherkin_scenario or ""
             canonical = _canonical_script(r.script_path, r.script_content)
+            metadata = r.metadata if isinstance(r.metadata, dict) else None
             # Full-row scaffold — enough to RESURRECT this row if a later regen
             # deletes it outright (test_cases has NOT-NULL title/type/tool/priority).
             row_scaffold = {
@@ -93,35 +117,46 @@ async def snapshot_test_cases(db, test_ids, batch_id: str, *,
                 "requirement_id": r.requirement_id, "ac_id": r.ac_id,
                 "project_id": r.project_id, "script_path": r.script_path,
                 "tags": list(r.tags) if r.tags else [],
+                "is_automated": r.is_automated, "is_flaky": r.is_flaky,
+                "last_status": r.last_status,
             }
             if hash_gate:
-                h = hashlib.sha256((gherkin + "\x00" + canonical).encode("utf-8", "replace")).hexdigest()
+                h = _snapshot_hash(gherkin, canonical, metadata, row_scaffold)
                 latest = await ver_repo.list_versions(r.test_id)
                 if latest:
                     lv = latest[0]
-                    lh = hashlib.sha256(((lv.gherkin_snapshot or "") + "\x00"
-                                         + (lv.script_snapshot or "")).encode("utf-8", "replace")).hexdigest()
+                    lh = _snapshot_hash(lv.gherkin_snapshot, lv.script_snapshot,
+                                        getattr(lv, "metadata_snapshot", None),
+                                        getattr(lv, "row_snapshot", None))
                     if lh == h:
                         continue  # unchanged since last snapshot — no dup row
-            await ver_repo.create_version({
-                "test_id": r.test_id,
-                "change_reason": f"{reason_prefix}:{batch_id}",
-                "gherkin_snapshot": gherkin,
-                "script_snapshot": canonical,
-                "metadata_snapshot": r.metadata if isinstance(r.metadata, dict) else None,
-                "row_snapshot": row_scaffold,
-                "changed_by": "force_regen" if reason_prefix == "pre_regen" else "arta-revert",
-            })
-            made += 1
+            # Per-row SAVEPOINT: one row's failure (e.g. a version-number race)
+            # rolls back ONLY that row and leaves the txn healthy for the rest —
+            # so a single bad row can't poison the caller's transaction or lose
+            # the whole batch's history.
+            try:
+                async with db.begin_nested():
+                    await ver_repo.create_version({
+                        "test_id": r.test_id,
+                        "change_reason": f"{reason_prefix}:{batch_id}",
+                        "gherkin_snapshot": gherkin,
+                        "script_snapshot": canonical,
+                        "metadata_snapshot": metadata,
+                        "row_snapshot": row_scaffold,
+                        "changed_by": "force_regen" if reason_prefix == "pre_regen" else "arta-revert",
+                    })
+                made += 1
+            except Exception:
+                log.error("snapshot_test_cases: FAILED to version test_id=%s batch=%s "
+                          "(history NOT saved for this test)", r.test_id, batch_id, exc_info=True)
         return made
-    except Exception as exc:
-        log.warning("snapshot_test_cases SKIPPED (history NOT saved) batch=%s: %s: %s",
-                    batch_id, type(exc).__name__, exc)
+    except Exception:
+        # Fail-open (never block regen), but LOUD — this is history loss of the
+        # very data the feature protects. Name the affected ids so the operator
+        # can recover them from disk/.r215.bak if needed.
+        log.error("snapshot_test_cases FAILED — history NOT saved (unrecoverable) "
+                  "batch=%s test_ids=%s", batch_id, test_ids, exc_info=True)
         return 0
-
-
-# Traversal-guard boundary — a DB-sourced script_path must resolve under here.
-_AUTOMATION_ROOT = (Path.cwd() / "src" / "automation").resolve()
 
 
 def _resolve_under_automation(script_path: str) -> Path | None:
@@ -130,7 +165,7 @@ def _resolve_under_automation(script_path: str) -> Path | None:
     traversal writes). Security boundary for revert's disk write."""
     p = Path(script_path)
     if not p.is_absolute():
-        p = Path.cwd() / p
+        p = _REPO_ROOT / p
     rp = p.resolve()
     root = str(_AUTOMATION_ROOT)
     if str(rp) == root or str(rp).startswith(root + os.sep):
@@ -183,13 +218,13 @@ async def apply_version_to_test_case(db, test_id: str, target, *,
         # is what makes "undo my force-generate" restore the WHOLE prior gen, not
         # just the tests that still exist.
         script_path = scaffold.get("script_path")
-        await db.execute(_sql("""
+        _ins = await db.execute(_sql("""
             INSERT INTO test_cases (test_id, title, gherkin_scenario, script_content,
-                script_path, automation_tool, priority, test_type, is_automated,
+                script_path, automation_tool, priority, test_type, is_automated, is_flaky,
                 requirement_id, ac_id, project_id, metadata, tags)
             VALUES (:test_id, :title, :gherkin, :script, :script_path,
                 CAST(:tool AS automation_tool), CAST(:priority AS risk_priority),
-                CAST(:test_type AS test_type), true,
+                CAST(:test_type AS test_type), :is_automated, :is_flaky,
                 CAST(NULLIF(:requirement_id,'') AS uuid), CAST(NULLIF(:ac_id,'') AS uuid),
                 CAST(NULLIF(:project_id,'') AS uuid), CAST(:metadata AS jsonb), :tags)
             ON CONFLICT (test_id) DO NOTHING
@@ -199,14 +234,24 @@ async def apply_version_to_test_case(db, test_id: str, target, *,
             "tool": scaffold.get("automation_tool") or "playwright",
             "priority": scaffold.get("priority") or "P2",
             "test_type": scaffold.get("test_type") or "integration",
+            # preserve automation/flaky state so a manual (non-automated) test is
+            # not resurrected as automated (default True only for pre-015 scaffolds).
+            "is_automated": True if scaffold.get("is_automated") is None else bool(scaffold.get("is_automated")),
+            "is_flaky": bool(scaffold.get("is_flaky")),
             "requirement_id": scaffold.get("requirement_id") or "",
             "ac_id": scaffold.get("ac_id") or "",
             "project_id": scaffold.get("project_id") or "",
             "metadata": json.dumps(metadata if isinstance(metadata, dict) else {}),
             "tags": scaffold.get("tags") or [],
         })
-        status["applied"] = ["resurrected"]
-        status["resurrected"] = True
+        if _ins.rowcount == 1:
+            status["applied"] = ["resurrected"]
+            status["resurrected"] = True
+        else:
+            # a concurrent regen re-created the row between our existence check
+            # and the INSERT → ON CONFLICT DO NOTHING skipped; do NOT claim success.
+            status["applied"] = ["already_exists"]
+            log.warning("revert: %s already re-created concurrently — resurrect skipped", test_id)
     else:
         # deleted AND no scaffold (pre-migration snapshot) — content preserved in
         # history but the row can't be rebuilt. Honest no-op.
@@ -488,6 +533,10 @@ async def restore_previous_generation(req_id: str):
     from ..db_adapter import try_db
 
     req = req_id.upper()
+    # Reject LIKE metacharacters (%/_) and stray chars — a crafted req_id like
+    # "REQ-%" would otherwise match every test and restore the globally-latest
+    if not re.match(r"^[A-Z0-9][A-Z0-9-]*$", req):
+        raise HTTPException(400, f"Invalid requirement id {req_id!r} — expected e.g. REQ-XY-016")
     async with try_db() as db:
         if not db:
             raise HTTPException(503, "Database unavailable — restore requires version history")
@@ -523,16 +572,22 @@ async def restore_previous_generation(req_id: str):
                 if not target:
                     skipped.append({"test_id": tid, "reason": "no snapshot in batch"})
                     continue
-                status = await apply_version_to_test_case(db, tid, target)
-                await ver_repo.create_version({
-                    "test_id": tid,
-                    "change_reason": f"Restored previous generation (v{target.version})",
-                    "gherkin_snapshot": target.gherkin_snapshot or "",
-                    "script_snapshot": target.script_snapshot or "",
-                    "metadata_snapshot": getattr(target, "metadata_snapshot", None),
-                    "row_snapshot": getattr(target, "row_snapshot", None),
-                    "changed_by": "arta-restore",
-                })
+                # H1 — per-test SAVEPOINT: under Postgres the first failing
+                # statement poisons the whole transaction. Without this, one bad
+                # test would make every later iteration fail AND the final commit
+                # roll back the tests that already succeeded. begin_nested() rolls
+                # back ONLY this test on failure, so the loop truly continues.
+                async with db.begin_nested():
+                    status = await apply_version_to_test_case(db, tid, target)
+                    await ver_repo.create_version({
+                        "test_id": tid,
+                        "change_reason": f"Restored previous generation (v{target.version})",
+                        "gherkin_snapshot": target.gherkin_snapshot or "",
+                        "script_snapshot": target.script_snapshot or "",
+                        "metadata_snapshot": getattr(target, "metadata_snapshot", None),
+                        "row_snapshot": getattr(target, "row_snapshot", None),
+                        "changed_by": "arta-restore",
+                    })
                 reverted.append({"test_id": tid, "to_version": target.version, "restored": status})
             except Exception as exc:
                 log.warning("restore-previous-generation: %s skipped: %s", tid, exc)

@@ -186,7 +186,17 @@ export default function TestExplorerPage() {
     setReverting(true)
     try {
       const r = await restorePreviousGeneration(reqId)
-      alert(`Restored ${r.reverted} test(s)${r.skipped ? `, ${r.skipped} skipped (no prior snapshot)` : ''}.`)
+      // Surface the resurrected count — the headline of "undo my force-generate"
+      // (tests the regen DELETED, rebuilt from the row scaffold, not just content-restored).
+      const resur = r.resurrected ? ` (${r.resurrected} resurrected)` : ''
+      const skip = r.skipped ? `, ${r.skipped} skipped` : ''
+      alert(`Restored ${r.reverted} test(s)${resur}${skip}.`)
+      // Refresh the version drawer too (backend appended a "Restored…" version row),
+      // matching the per-test revert path — else the open drawer shows stale history.
+      if (selected?.test_id) {
+        const d = await fetchTestVersions(selected.test_id).catch(() => null)
+        if (d?.versions?.length) setTestVersions(mapVersions(d.versions))
+      }
       refreshTests()
     } catch (e) { alert('Restore failed: ' + e) }
     finally { setReverting(false) }

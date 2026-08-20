@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,18 @@ log = logging.getLogger(__name__)
 
 _CACHE_DIR = Path(".arta/openapi")
 _TTL_SEC = 86400  # 24h
+# A2 — after a stale-serve (live re-fetch failed), suppress further live probes
+# for this long by nudging the cache mtime forward, so a source-derived-spec SUT
+# doesn't pay the full 8-path probe tax on EVERY fetch_openapi. Re-probe ~hourly.
+_REPROBE_INTERVAL_SEC = 3600
+
+# C1 (security) — TLS verification is ON by default for SUT swagger probes. Some
+# self-signed staging SUTs need it off; that must be an explicit, logged opt-in,
+# not the silent default it used to be.
+_PROBE_INSECURE = os.environ.get("ARTA_OPENAPI_PROBE_INSECURE") == "1"
+if _PROBE_INSECURE:
+    log.warning("R18a: SUT swagger-probe TLS verification DISABLED "
+                "(ARTA_OPENAPI_PROBE_INSECURE=1) — MITM exposure; dev/self-signed only")
 
 # Mirrors _try_openapi() in api_discovery.py + a couple of extra paths.
 CANONICAL_SWAGGER_PATHS = [
@@ -70,7 +83,8 @@ async def fetch_openapi(api_base_url: str, project_id: str) -> dict | None:
         return cached
 
     base = api_base_url.rstrip("/")
-    async with httpx.AsyncClient(timeout=8.0, follow_redirects=True, verify=False) as c:
+    async with httpx.AsyncClient(timeout=8.0, follow_redirects=True,
+                                 verify=not _PROBE_INSECURE) as c:
         for path in CANONICAL_SWAGGER_PATHS:
             url = base + path
             try:
@@ -108,6 +122,18 @@ async def fetch_openapi(api_base_url: str, project_id: str) -> dict | None:
             "failed; %d paths) — beats refusing gen",
             project_id, base, len(stale.get("paths") or {}),
         )
+        # A2 — suppress the expensive 8-path probe for ~1h by nudging the cache
+        # mtime forward, so the next fetch hits the fresh-cache short-circuit
+        # instead of re-paying the probe tax on every call.
+        try:
+            _t = time.time() - _TTL_SEC + _REPROBE_INTERVAL_SEC
+            os.utime(_cache_path(project_id), (_t, _t))
+        except Exception:
+            pass
+        # A3 — mark the spec stale so grounding consumers (R18b/c) can downgrade
+        # confidence; availability-over-refusal is deliberate but visible.
+        if isinstance(stale, dict):
+            stale["x-arta-stale"] = True
         return stale
 
     log.info("R18a: no OpenAPI spec found at %s for project %s", base, project_id)

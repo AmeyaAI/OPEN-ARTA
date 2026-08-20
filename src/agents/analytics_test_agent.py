@@ -1053,10 +1053,12 @@ class AnalyticsTestAgent:
         try:
             from .grounding_validator import (
                 validate_pytest_grounded as _validate_pytest_g,
+                validate_pytest_undefined_symbols as _validate_pytest_undef,
                 format_violations_as_hint as _fmt_hint,
             )
         except Exception:
             _validate_pytest_g = None
+            _validate_pytest_undef = None
             _fmt_hint = None
 
         retry_hint = ""
@@ -1085,30 +1087,40 @@ class AnalyticsTestAgent:
                     "R112.G: pytest %s — rewrote %d bare assert(s) to tolerant_assert",
                     layer["name"], _r112_g_count,
                 )
-            if _validate_pytest_g is None or _fmt_hint is None or recipe is None:
-                break  # grounding unavailable; accept the attempt
-            try:
-                pytest_violations = _validate_pytest_g(
-                    code, recipe=recipe, ac_id=None,
-                )
-            except Exception as _gex:
-                _r47_4a_log.debug(
-                    "R47.4a: grounding error for %s: %s; accepting code as-is",
-                    layer["name"], _gex,
-                )
-                break
-            if not pytest_violations:
+            # R123.A parity — undefined symbols (NameError / bad arta_runtime
+            # import) are ALWAYS rejected, independent of recipe grounding.
+            undef_viol = []
+            if _validate_pytest_undef is not None:
+                try:
+                    undef_viol = _validate_pytest_undef(code)
+                except Exception:
+                    undef_viol = []
+
+            grounding_viol = []
+            if _validate_pytest_g is not None and recipe is not None:
+                try:
+                    grounding_viol = _validate_pytest_g(code, recipe=recipe, ac_id=None)
+                except Exception as _gex:
+                    _r47_4a_log.debug(
+                        "R47.4a: grounding error for %s: %s; accepting code as-is",
+                        layer["name"], _gex,
+                    )
+                    grounding_viol = []
+
+            all_viol = list(undef_viol) + list(grounding_viol)
+            if not all_viol:
                 if attempt > 1:
                     _r47_4a_log.info(
-                        "R47.4a: pytest %s succeeded grounding on attempt %d",
+                        "R47.4a: pytest %s passed validation on attempt %d",
                         layer["name"], attempt,
                     )
                 break
-            retry_hint = _fmt_hint(pytest_violations)
+            retry_hint = (_fmt_hint(all_viol) if _fmt_hint
+                          else "; ".join(f"{v.symbol}: {v.hint}" for v in all_viol[:5]))
             _r47_4a_log.warning(
-                "R47.4a: pytest %s attempt %d has %d grounding violation(s): %s",
-                layer["name"], attempt, len(pytest_violations),
-                [v.symbol for v in pytest_violations[:5]],
+                "R47.4a: pytest %s attempt %d has %d violation(s) (%d undefined-symbol): %s",
+                layer["name"], attempt, len(all_viol), len(undef_viol),
+                [v.symbol for v in all_viol[:5]],
             )
             if attempt == 3:
                 _r47_4a_log.warning(
@@ -1127,7 +1139,7 @@ class AnalyticsTestAgent:
         # pollute the RAW pass-rate denominator.
         try:
             grounding_failed = False
-            if pytest_violations and attempt == 3:
+            if all_viol and attempt == 3:
                 grounding_failed = True
         except UnboundLocalError:
             grounding_failed = False
@@ -1138,7 +1150,7 @@ class AnalyticsTestAgent:
             header = (
                 "# ARTA_GROUNDING_FAILED=true\n"
                 f"# R55.3: pytest gen ({layer['name']}) failed grounding after 3 retries\n"
-                f"# violations={len(pytest_violations)} signature={','.join(v.kind for v in pytest_violations[:3])}\n"
+                f"# violations={len(all_viol)} signature={','.join(v.kind for v in all_viol[:3])}\n"
             )
             code = header + code
 
@@ -1157,12 +1169,12 @@ class AnalyticsTestAgent:
                     "triage_category": "test_gen_bug",
                     "signals": ["grounding_violation_after_retries", "pytest", layer.get("tier", "")],
                     "sample_error": (
-                        f"Pytest gen exhausted 3 retries with {len(pytest_violations)} "
+                        f"Pytest gen exhausted 3 retries with {len(all_viol)} "
                         f"grounding violation(s)"
                     ),
                     "violation_details": [
                         {"kind": v.kind, "symbol": v.symbol, "location": getattr(v, "location", "")}
-                        for v in pytest_violations[:20]
+                        for v in all_viol[:20]
                     ],
                     "queued_at": _dt_55_3.now(_tz_55_3.utc).isoformat(),
                     "queued_by": "R55.3_pytest_gen",
