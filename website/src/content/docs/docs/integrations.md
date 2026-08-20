@@ -20,7 +20,7 @@ can run a local model while another uses a cloud model in the same install.
 If a provider is misconfigured, ARTA raises an error rather than silently
 falling back to a different endpoint — data residency should never fail open.
 
-See [`.env.example`](https://github.com/gangadharneeli/OPEN-ARTA/blob/main/.env.example)
+See [`.env.example`](https://github.com/AmeyaAI/OPEN-ARTA/blob/main/.env.example)
 for the complete provider configuration surface.
 
 ## Jira

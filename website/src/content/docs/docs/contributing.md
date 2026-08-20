@@ -5,7 +5,7 @@ description: How to contribute to ARTA — ground rules, the development loop, t
 
 ARTA is developed in the open, and contributions are welcome. The canonical
 guide is
-[CONTRIBUTING.md](https://github.com/gangadharneeli/OPEN-ARTA/blob/main/CONTRIBUTING.md)
+[CONTRIBUTING.md](https://github.com/AmeyaAI/OPEN-ARTA/blob/main/CONTRIBUTING.md)
 in the repository; this page is the short version.
 
 ## Ground rules
@@ -14,7 +14,7 @@ These are review policy, not aspirations:
 
 - **The local loop stays free.** PRs that meter, gate, or cripple single-team
   functionality are rejected. The commercial boundary is documented in
-  [ee/README.md](https://github.com/gangadharneeli/OPEN-ARTA/blob/main/ee/README.md).
+  [ee/README.md](https://github.com/AmeyaAI/OPEN-ARTA/blob/main/ee/README.md).
 - **Truthful reporting is the product.** Changes that make a report look
   better without making it more *true* — hiding failures, silent fallbacks,
   optimistic classification — are rejected.
@@ -35,7 +35,7 @@ Run the full stack locally with `docker compose up -d` (see
 
 ## CLA
 
-A lightweight [CLA](https://github.com/gangadharneeli/OPEN-ARTA/blob/main/docs/CLA.md)
+A lightweight [CLA](https://github.com/AmeyaAI/OPEN-ARTA/blob/main/docs/CLA.md)
 is enforced by a workflow: on your first PR you sign with a single PR
 comment. Your copyright stays yours.
 

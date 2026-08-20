@@ -2,7 +2,7 @@
 
 The public website and documentation for ARTA, built with
 [Astro](https://astro.build) + [Starlight](https://starlight.astro.build) and
-deployed to GitHub Pages at https://gangadharneeli.github.io/OPEN-ARTA/.
+deployed to GitHub Pages at https://ameyaai.github.io/OPEN-ARTA/.
 
 ## Local development
 

@@ -2,7 +2,7 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
-const site = 'https://gangadharneeli.github.io';
+const site = 'https://ameyaai.github.io';
 const base = '/OPEN-ARTA';
 
 // https://astro.build/config
@@ -17,10 +17,10 @@ export default defineConfig({
 				'Open-source AI test automation that understands your software — grounded test generation, six execution runtimes, and truthful, audit-grade reporting.',
 			logo: { src: './public/favicon.svg', alt: 'ARTA' },
 			social: [
-				{ icon: 'github', label: 'GitHub', href: 'https://github.com/gangadharneeli/OPEN-ARTA' },
+				{ icon: 'github', label: 'GitHub', href: 'https://github.com/AmeyaAI/OPEN-ARTA' },
 			],
 			editLink: {
-				baseUrl: 'https://github.com/gangadharneeli/OPEN-ARTA/edit/main/website/',
+				baseUrl: 'https://github.com/AmeyaAI/OPEN-ARTA/edit/main/website/',
 			},
 			customCss: [
 				'@fontsource-variable/bricolage-grotesque',

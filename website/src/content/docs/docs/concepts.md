@@ -11,7 +11,7 @@ Every AI testing tool claims it doesn't hallucinate. ARTA is the one that
 shows you the code that enforces it: generation is constrained by what
 **discovery actually found** — the DOM catalog, captured endpoints, the
 OpenAPI spec, and source code — and every generated test then passes through
-[grounding validators](https://github.com/gangadharneeli/OPEN-ARTA/blob/main/src/agents/grounding_validator.py)
+[grounding validators](https://github.com/AmeyaAI/OPEN-ARTA/blob/main/src/agents/grounding_validator.py)
 that reject selectors, roles, and endpoints that don't exist in your system.
 
 Rejected tests are retried with corrective hints. If they still can't be

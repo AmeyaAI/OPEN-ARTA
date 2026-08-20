@@ -21,8 +21,8 @@ classifiers = [
 dynamic = ["dependencies"]
 
 [project.urls]
-Homepage = "https://github.com/gangadharneeli/OPEN-ARTA"
-Documentation = "https://github.com/gangadharneeli/OPEN-ARTA/tree/main/docs"
+Homepage = "https://github.com/AmeyaAI/OPEN-ARTA"
+Documentation = "https://github.com/AmeyaAI/OPEN-ARTA/tree/main/docs"
 
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
