@@ -1152,6 +1152,18 @@ export async function fetchTestVersionDiff(testId: string, v1: number, v2: numbe
   return request<{ diff: string; additions: number; deletions: number }>(`/api/tests/${testId}/versions/${v1}/diff/${v2}`)
 }
 
+// Revert one test case to a specific version (restores DB + disk + sidecar + metadata).
+export async function revertTestVersion(testId: string, version: number) {
+  return request<{ reverted_to: number; test_id: string; restored: any }>(
+    `/api/tests/${testId}/versions/${version}/revert`, { method: 'POST' })
+}
+
+// One-click "undo my force-generate" — restore a requirement's whole prior generation.
+export async function restorePreviousGeneration(reqId: string) {
+  return request<{ requirement_id: string; reverted: number; skipped: number }>(
+    `/api/tests/requirements/${reqId}/restore-previous-generation`, { method: 'POST' })
+}
+
 // ── NFR Assessment ──────────────────────────────────────────────────────────
 
 export async function fetchNFRAssessment(

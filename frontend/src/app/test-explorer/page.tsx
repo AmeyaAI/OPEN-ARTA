@@ -20,6 +20,8 @@ import {
   requestHeal,
   fetchTestVersions,
   fetchTestVersionDiff,
+  revertTestVersion,
+  restorePreviousGeneration,
   fetchEnvironments,
   fetchDiscoveryStatus,
   computeToolInventoryGaps,
@@ -148,6 +150,47 @@ export default function TestExplorerPage() {
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null)
   const [testVersions, setTestVersions] = useState<{ version: number; date: string; summary: string; author: string }[]>([])
   const [versionDiff, setVersionDiff] = useState<{ diff: string; additions: number; deletions: number } | null>(null)
+  const [reverting, setReverting] = useState(false)
+
+  // Normalize the raw DB version columns (change_reason/created_at/changed_by)
+  // into the drawer's display shape; the API returns newest-first.
+  const mapVersions = (vs: any[]) => vs.map((v: any) => ({
+    version: v.version,
+    date: (v.created_at || v.date || '').toString().slice(0, 10),
+    summary: v.change_reason || v.summary || '—',
+    author: v.changed_by || v.author || 'ARTA',
+  }))
+
+  const refreshTests = () => {
+    const params = { ...filter, project_id: currentProjectId || undefined, flag: flagParam }
+    fetchTests(params).then(d => { setTests(d.tests); setTotal(d.total) }).catch(() => {})
+  }
+
+  const handleRevertVersion = async (version: number) => {
+    if (!selected?.test_id || reverting) return
+    if (!confirm(`Revert ${selected.test_id} to v${version}?\nRestores that version's script, DB record, and traceability. This revert is itself undoable.`)) return
+    setReverting(true)
+    try {
+      await revertTestVersion(selected.test_id, version)
+      const d = await fetchTestVersions(selected.test_id).catch(() => null)
+      if (d?.versions?.length) setTestVersions(mapVersions(d.versions))
+      refreshTests()
+    } catch (e) { alert('Revert failed: ' + e) }
+    finally { setReverting(false) }
+  }
+
+  const handleRestorePrevGen = async () => {
+    const reqId = selected?.requirement_id
+    if (!reqId || reverting) return
+    if (!confirm(`Restore the PREVIOUS generation of ${reqId}?\nEvery test of this requirement reverts to the state captured just before the last force-generate.`)) return
+    setReverting(true)
+    try {
+      const r = await restorePreviousGeneration(reqId)
+      alert(`Restored ${r.reverted} test(s)${r.skipped ? `, ${r.skipped} skipped (no prior snapshot)` : ''}.`)
+      refreshTests()
+    } catch (e) { alert('Restore failed: ' + e) }
+    finally { setReverting(false) }
+  }
 
   // Fetch real version history when history drawer opens
   useEffect(() => {
@@ -157,7 +200,9 @@ export default function TestExplorerPage() {
       return
     }
     fetchTestVersions(selected.test_id)
-      .then(d => { if (d?.versions?.length) setTestVersions(d.versions) })
+      .then(d => {
+        if (d?.versions?.length) setTestVersions(mapVersions(d.versions))
+      })
       .catch(() => {
         // Fallback: build a single-entry history from the test's generated_at
         if (selected?.generated_at) {
@@ -1773,16 +1818,31 @@ export default function TestExplorerPage() {
               </button>
             </div>
 
+            {/* Requirement-level "undo my force-generate" */}
+            {selected.requirement_id && (
+              <div className="px-4 pt-3">
+                <button
+                  onClick={handleRestorePrevGen}
+                  disabled={reverting}
+                  className="w-full rounded-lg px-3 py-2 text-[11px] font-semibold transition disabled:opacity-50"
+                  style={{ background: '#1e1b3a', border: '1px solid #4338ca', color: '#c7d2fe' }}
+                  title={`Restore all tests of ${selected.requirement_id} to before the last force-generate`}
+                >
+                  {'↩'} Restore previous generation ({selected.requirement_id})
+                </button>
+              </div>
+            )}
+
             {/* Version List */}
             <div className="p-4 space-y-2">
               {testVersions.length === 0 && (
                 <p className="text-[11px] text-center py-4" style={{ color: '#64748b' }}>No version history available</p>
               )}
               {testVersions.map(v => (
-                <button
+                <div
                   key={v.version}
                   onClick={() => setSelectedVersion(selectedVersion === v.version ? null : v.version)}
-                  className="w-full text-left rounded-lg px-4 py-3 transition"
+                  className="w-full text-left rounded-lg px-4 py-3 transition cursor-pointer"
                   style={{
                     background: selectedVersion === v.version ? '#1a1a2e' : '#12121f',
                     border: `1px solid ${selectedVersion === v.version ? '#6366f1' : '#1e1e3a'}`,
@@ -1795,8 +1855,18 @@ export default function TestExplorerPage() {
                     <span className="text-[10px] font-mono" style={{ color: '#94a3b8' }}>{v.date}</span>
                   </div>
                   <p className="text-[11px]" style={{ color: '#94a3b8' }}>{v.summary}</p>
-                  <span className="text-[10px]" style={{ color: '#64748b' }}>by {v.author}</span>
-                </button>
+                  <div className="flex items-center justify-between mt-1">
+                    <span className="text-[10px]" style={{ color: '#64748b' }}>by {v.author}</span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleRevertVersion(v.version) }}
+                      disabled={reverting}
+                      className="text-[10px] font-semibold rounded px-2 py-0.5 transition disabled:opacity-50"
+                      style={{ background: '#1e293b', border: '1px solid #334155', color: '#93c5fd' }}
+                    >
+                      {'↩'} Revert to this version
+                    </button>
+                  </div>
+                </div>
               ))}
             </div>
 

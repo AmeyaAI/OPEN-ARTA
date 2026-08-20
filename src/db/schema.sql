@@ -717,6 +717,7 @@ CREATE TABLE IF NOT EXISTS test_case_versions (
     change_reason    TEXT,
     gherkin_snapshot TEXT,
     script_snapshot  TEXT,
+    metadata_snapshot JSONB,                 -- per-test traceability spine at snapshot time
     changed_by       TEXT DEFAULT 'arta-agent',
     created_at       TIMESTAMPTZ DEFAULT now(),
     UNIQUE(test_id, version)

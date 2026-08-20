@@ -4914,6 +4914,16 @@ async def generate_tests(body: GenerateRequest, request: Request):
         from ...db.session import async_session_factory
         from sqlalchemy import text as _text
         async with async_session_factory() as session:
+            # Snapshot the CURRENT rows before the UPSERT overwrites them — so a
+            # (force or non-force) sync regen no longer destroys the prior gen.
+            try:
+                from datetime import datetime as _dt, timezone as _tz
+                from .tests_versions import snapshot_test_cases
+                await snapshot_test_cases(
+                    session, [te["id"] for te in generated_tests],
+                    batch_id="sync-" + _dt.now(_tz.utc).strftime("%Y%m%dT%H%M%SZ"))
+            except Exception:
+                pass
             for te in generated_tests:
                 # Gap-1.2: Persist traceability + analytics fields so they survive container restart.
                 # Columns added by migration 002_traceability.sql.
@@ -6611,12 +6621,20 @@ async def _generate_all_background(job_id: str, project_id: str, reqs: list, req
         try:
             from ...db.session import async_session_factory
             from sqlalchemy import text
+            from .tests_versions import snapshot_test_cases
             async with async_session_factory() as session:
                 for _tid in _tc_ids:
                     _tcp = str(_tid).replace("REQ-", "TC-")
+                    _pat = f"{_tcp}%" if _fam_clear else f"{_tcp}-%"
+                    # Snapshot the CURRENT rows into version history BEFORE deleting
+                    # them — so this force-regen no longer destroys the prior gen.
+                    _victims = [row.test_id for row in (await session.execute(
+                        text("SELECT test_id FROM test_cases WHERE test_id LIKE :pattern"),
+                        {"pattern": _pat})).all()]
+                    await snapshot_test_cases(session, _victims, batch_id=job_id)
                     await session.execute(
                         text("DELETE FROM test_cases WHERE test_id LIKE :pattern"),
-                        {"pattern": (f"{_tcp}%" if _fam_clear else f"{_tcp}-%")},
+                        {"pattern": _pat},
                     )
                 await session.commit()
         except Exception:
