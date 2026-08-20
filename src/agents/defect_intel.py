@@ -154,6 +154,118 @@ def _r127_d6_f_compute_subclass(metadata: dict | None) -> str | None:
     return None
 
 
+# ── Deterministic charter RCA — impact / preventive_action / 5-level deep-dive ──
+#
+# The charter requires EVERY issue to carry {root_cause, impact, severity,
+# recommended_fix, preventive_action} + a 5-level deep-dive (symptom → immediate
+# → upstream → architectural → process). The LLM RCA path (analyze_failures →
+# RCA_PROMPT) produces all of that — but it runs ONLY for `sut_regression` (by
+# design: the deterministically-triaged majority — test_gen_bug / grounding_blocked
+# / sut_contract_change / operator_review — is built WITHOUT an LLM for token/cost
+# efficiency). Those LLM-free defects already carry root_cause + fix + severity;
+# they were MISSING impact + preventive_action + deep_dive.
+#
+# This taxonomy fills exactly those three, DETERMINISTICALLY (the root cause of
+# each known class IS known — no LLM needed), so the charter contract holds for
+# every defect while preserving the efficiency mandate. Keyed on `defect_class`;
+# `{signals}` is interpolated from the defect's triage_signals. Single source of
+# truth for the deterministic branch. Killswitch ARTA_DETERMINISTIC_RCA_DISABLE.
+_DETERMINISTIC_RCA: dict[str, dict] = {
+    "grounding_blocked": {
+        "impact": "This spec was BLOCKED at dispatch and never executed against "
+                  "the SUT — the requirement's coverage for this scenario is "
+                  "UNVERIFIED until a clean regen ships. SUT quality is not implicated.",
+        "preventive_action": "Strengthen the gen-time grounding constraint (DOM "
+                             "catalog / captured-endpoint / valid-role injection) so "
+                             "the LLM cannot emit the violating pattern; the R57.1 "
+                             "retry-with-hint loop should converge within 3 attempts.",
+        "deep_dive": {
+            "symptom": "Spec surfaced a BLOCKED row with 0 SUT execution.",
+            "immediate_cause": "R102.C dispatch gate read the R102.A grounding-"
+                               "violation stamp on the spec and skipped execution.",
+            "upstream_cause": "Gen emitted a hallucinated selector / endpoint / role "
+                              "that the grounding validator rejected ({signals}).",
+            "architectural_cause": "The SUT's real DOM/endpoint/role inventory was "
+                                   "not fully injected into the gen prompt, or the "
+                                   "LLM did not honour the injected HARD CONSTRAINT.",
+            "process_cause": "The R57.1 retry-with-hint loop exhausted its attempts "
+                             "without converging on a grounded spec.",
+        },
+    },
+    "test_gen_bug": {
+        "impact": "ARTA-side artifact defect — SUT quality is NOT implicated. The "
+                  "affected scenario's coverage is deferred to the self-heal regen queue.",
+        "preventive_action": "Add or tighten the gen-time validator / deterministic "
+                             "rewriter for this pattern so it is corrected AT GEN, "
+                             "not caught at execution.",
+        "deep_dive": {
+            "symptom": "Test failed on a flaw in the ARTA-generated artifact.",
+            "immediate_cause": "The generated script/collection carried a gen-quality "
+                               "flaw ({signals}).",
+            "upstream_cause": "The LLM emitted a pattern the grounding/rewriter layer "
+                              "did not fully constrain.",
+            "architectural_cause": "A gen-quality gate gap for this pattern class.",
+            "process_cause": "The flaw passed the gen gate and surfaced only at "
+                             "execution instead of being blocked/healed at gen.",
+        },
+    },
+    "sut_contract_change": {
+        "impact": "A consumer's extraction/assertion is stale; chained tests that "
+                  "depend on it may cascade until the contract is re-grounded.",
+        "preventive_action": "Re-run response-shape discovery (R305/R212) so the "
+                             "captured shape reflects the SUT's current contract, then "
+                             "regenerate assertions from the refreshed shape.",
+        "deep_dive": {
+            "symptom": "Assertion/extraction failed on a response-shape mismatch.",
+            "immediate_cause": "The SUT returned a different field/structure than the "
+                               "test expects ({signals}).",
+            "upstream_cause": "The SUT's response contract changed (rename/reorg) "
+                              "since the shape was captured.",
+            "architectural_cause": "The test was grounded on a now-stale captured "
+                                   "response_body_shape.",
+            "process_cause": "Discovery/capture was not refreshed before this run.",
+        },
+    },
+    "operator_review": {
+        "impact": "Unclassified — the failure's SUT-vs-ARTA attribution is UNKNOWN "
+                  "until an operator triages it; do not read it as a SUT finding yet.",
+        "preventive_action": "Extend the deterministic triage rules (R258/R300) to "
+                             "recognize this failure shape so future occurrences "
+                             "classify automatically instead of falling to review.",
+        "deep_dive": {
+            "symptom": "Test failed with a pattern the deterministic triage did not match.",
+            "immediate_cause": "The failure evidence matched no known triage rule "
+                               "({signals}).",
+            "upstream_cause": "Unknown until triaged — could be SUT, test-gen, or env.",
+            "architectural_cause": "A coverage gap in the deterministic triage taxonomy.",
+            "process_cause": "The failure shape is novel, or the evidence is "
+                             "insufficient for automatic classification.",
+        },
+    },
+}
+
+
+def deterministic_rca_fields(defect_class: str | None,
+                             triage_signals: list | None = None) -> dict:
+    """The charter's impact + preventive_action + 5-level deep_dive for a KNOWN
+    deterministic defect class — no LLM (the root cause of each class is known).
+    Returns {} for an unknown class or when disabled (fail-open). `triage_signals`
+    are interpolated into the `{signals}` slots. Deterministic; single-source for
+    the LLM-free defect branch."""
+    if os.environ.get("ARTA_DETERMINISTIC_RCA_DISABLE") == "1":
+        return {}
+    tmpl = _DETERMINISTIC_RCA.get(str(defect_class or ""))
+    if not tmpl:
+        return {}
+    sig = ", ".join(str(s) for s in (triage_signals or [])) or "no specific signal recorded"
+    dd = {k: v.replace("{signals}", sig) for k, v in tmpl["deep_dive"].items()}
+    return {
+        "impact": tmpl["impact"],
+        "preventive_action": tmpl["preventive_action"],
+        "deep_dive": dd,
+    }
+
+
 # ── R258.B — runner-agnostic status expectation parsing ──────────────────────
 # Pre-R258.B every call site used a bare `expected\s*:?\s*200` regex. That
 # matches Playwright's `Expected: 200 / Received: 404` but NOT Newman's
@@ -1877,6 +1989,14 @@ class DefectIntelAgent:
                     ),
                     "fix_suggestion": "Operator triage required.",
                 })
+            # Charter RCA completeness — the LLM-free defect already has
+            # root_cause + fix + severity; fill the MISSING impact +
+            # preventive_action + 5-level deep_dive DETERMINISTICALLY (no LLM,
+            # per the efficiency mandate). setdefault: never override a class-
+            # specific field set above.
+            for _k, _v in deterministic_rca_fields(
+                    base.get("defect_class"), base.get("triage_signals")).items():
+                base.setdefault(_k, _v)
             non_regression_defects.append(base)
 
         # Real SUT regressions → existing LLM RCA path (one ticket each).
