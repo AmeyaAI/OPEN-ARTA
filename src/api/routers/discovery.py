@@ -456,6 +456,8 @@ async def grounding_coverage(project_id: str) -> dict:
             # distinct entities under test (coverage-by-entity).
             "data_object_count": rt.get("data_object_count", 0),
             "entities_under_test": rt.get("entities_under_test", []),
+            # AC→Workflow spine: tests linked to a captured business workflow (chain).
+            "workflow_linked_count": rt.get("workflow_linked_count", 0),
         }
     except Exception as exc:
         log.debug("grounding_coverage tests block skipped: %s", exc)

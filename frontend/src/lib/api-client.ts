@@ -1784,6 +1784,8 @@ export interface GroundingCoverage {
     // API→Data spine: tests touching a named SUT domain entity + distinct entities
     data_object_count?: number
     entities_under_test?: string[]
+    // AC→Workflow spine: tests linked to a captured business workflow (chain)
+    workflow_linked_count?: number
   }
   source_grounding_available?: boolean
   // P1d — component flags behind source_grounding_available

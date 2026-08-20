@@ -489,6 +489,56 @@ def source_component_stamp(matched_endpoint_keys, mapped_endpoints: list | None)
     return {"components": comps, "component_count": len(comps)}
 
 
+# ── Business-Workflow stamp — which captured CallChain(s) a test exercises ────
+
+def build_chain_index(chains: list | None) -> dict:
+    """Inverted index `endpoint_key(METHOD:/path_template) → [{chain_id,
+    endpoint_count}]` from the project's captured CallChains
+    (api_discovery.load_chains). Built ONCE per gate run so per-test lookup is
+    O(matched_keys), not O(chains × nodes). Deterministic; {} on no chains."""
+    index: dict[str, list] = {}
+    for ch in (chains or []):
+        if not isinstance(ch, dict):
+            continue
+        nodes = ch.get("nodes") or []
+        meta = {"chain_id": ch.get("chain_id"), "endpoint_count": len(nodes)}
+        seen: set = set()
+        for n in nodes:
+            if not isinstance(n, dict):
+                continue
+            key = f"{(n.get('method') or 'GET').upper()}:{n.get('path_template') or n.get('path')}"
+            if key in seen:              # a chain counts once per endpoint_key
+                continue
+            seen.add(key)
+            index.setdefault(key, []).append(meta)
+    return index
+
+
+def workflow_stamp(matched_endpoint_keys, chain_index: dict | None) -> dict:
+    """The Business-Workflow dimension of a test's traceability: which captured
+    CallChain(s) — ordered API sequences with provides/consumes data
+    dependencies — the endpoints this test exercises belong to. Completes the
+    Req→AC→WORKFLOW→Code→API→Data→Test chain.
+
+    `matched_endpoint_keys` are `METHOD:/template` (from assess_traceability);
+    `chain_index` is the prebuilt `build_chain_index` map (same key space).
+    Returns {workflows:[{chain_id, endpoint_count, matched_count}], workflow_count}
+    (sorted by matched_count desc, cap 5). Empty when no chain match — the caller
+    stamps only when workflow_count>0. Deterministic; no LLM; fail-open {}."""
+    if not matched_endpoint_keys or not chain_index:
+        return {"workflows": [], "workflow_count": 0}
+    hits: dict = {}   # chain_id → {endpoint_count, matched_count}
+    for mk in matched_endpoint_keys:
+        for meta in chain_index.get(mk, []):
+            cid = meta.get("chain_id")
+            h = hits.setdefault(cid, {"chain_id": cid,
+                                      "endpoint_count": meta.get("endpoint_count", 0),
+                                      "matched_count": 0})
+            h["matched_count"] += 1
+    workflows = sorted(hits.values(), key=lambda w: w["matched_count"], reverse=True)
+    return {"workflows": workflows[:5], "workflow_count": len(workflows)}
+
+
 # ── R330 P1d — per-test grounding provenance (extracted from the tests.py gate
 # so it is unit-testable and evidence-preserving) ────────────────────────────
 
@@ -597,6 +647,9 @@ def read_traceability(project_id: str) -> dict:
         1 for r in rows if (r.get("data_objects") or {}).get("object_count"))
     entities_under_test = sorted({
         e for r in rows for e in ((r.get("data_objects") or {}).get("entities") or [])})
+    # Business-Workflow spine: tests linked to a captured business workflow (chain).
+    workflow_linked_count = sum(
+        1 for r in rows if (r.get("workflows") or {}).get("workflow_count"))
     return {
         "project_id": project_id,
         "test_count": n,
@@ -610,4 +663,5 @@ def read_traceability(project_id: str) -> dict:
         "source_component_count": source_component_count,
         "data_object_count": data_object_count,
         "entities_under_test": entities_under_test,
+        "workflow_linked_count": workflow_linked_count,
     }
