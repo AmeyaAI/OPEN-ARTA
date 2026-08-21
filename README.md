@@ -1,4 +1,4 @@
-# ARTA — the quality-evidence platform
+# ARTA - The Quality Evidence Platform
 
 > **AI now writes the code. ARTA is the independent layer that verifies it** —
 > requirements-grounded test generation, execution across six runtimes, and
@@ -23,19 +23,19 @@ Requirements (Jira / OpenAPI / Confluence / docs)
     → truthful mission report      pass/fail attribution · traceability graph · quality gate
 ```
 
-- **Grounded generation** — tests are generated against what discovery actually
+- **Grounded generation**: Tests are generated against what discovery actually
   found (DOM catalog, captured endpoints, OpenAPI spec, source code), then
   validated against it. Hallucinations are rejected at generation time, retried
   with hints, and honestly BLOCKED when they can't be fixed — never silently shipped.
-- **Six execution runtimes** — Playwright (UI), Newman (API), k6 (perf),
+- **Six execution runtimes**: Playwright (UI), Newman (API), k6 (perf),
   OWASP ZAP (security), Axe (a11y), Pytest (analytics). Cypress and Selenium
   scripts can be *generated*; execution for them is not implemented yet.
-- **Non-mutation guarantee** — discovery and testing never mutate your system by
+- **Non-mutation guarantee**: Discovery and testing never mutate your system by
   default, enforced independently at the network layer, generation time, and
   dispatch time. Destructive testing requires explicit opt-in markers *and* env vars.
-- **Traceability** — requirement → acceptance criterion → test → execution →
+- **Traceability**: Requirement → acceptance criterion → test → execution →
   defect, as a graph you can query.
-- **On-prem AI, verifiably** — Ollama by default, per-project provider config
+- **On-prem AI, verifiably**: Ollama by default, per-project provider config
   (Anthropic, OpenAI, Gemini, Azure), and an explicit refusal to silently fall
   back to a cloud endpoint when a provider is misconfigured.
 
