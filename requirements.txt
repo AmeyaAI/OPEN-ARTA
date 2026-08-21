@@ -59,7 +59,7 @@ grpcio-tools>=1.83.0,<2.0
 
 # Test execution
 pytest>=9.1.1
-pytest-asyncio>=0.24.0
+pytest-asyncio>=1.4.0
 # F20-21: _run_pytest_analytics invokes pytest with --json-report-file=...
 # Without this plugin, all 122 analytics results fail with "unrecognized
 # arguments: --json-report-file=..." (verified live in run-b96ce7).
