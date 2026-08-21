@@ -1917,9 +1917,15 @@ async def import_from_jira(body: JiraImportRequest, request: Request):
             except Exception as exc:
                 log.warning("import/jira: AC synthesis failed for %s: %s", key, exc)
 
+        # Raw Jira `fields.priority.name` → P-band. A name absent here silently
+        # defaults to "P2" — which mis-bands top-severity issues. Covers the Cloud
+        # and classic schemes plus the merged-scheme extras (Urgent/Nice to have/
+        # Some day) that some Jira instances expose via GET /rest/api/2/priority.
         _prio = {
-            "Highest": "P0", "High": "P1", "Medium": "P2",
-            "Low": "P3", "Lowest": "P3",
+            "Highest": "P0", "High": "P1", "Medium": "P2", "Low": "P3", "Lowest": "P3",
+            "Blocker": "P0", "Critical": "P1", "Major": "P2", "Minor": "P3", "Trivial": "P3",
+            "Urgent": "P0", "Normal": "P2", "Nice to have": "P3", "Some day": "P3",
+            "Unassigned": "P2",
         }.get(enriched.get("priority") or "", "P2")
         # R257 (WS2e) — PERSIST the JIRA ground truth.
         #
@@ -2140,14 +2146,17 @@ async def correct_requirement(req_id: str, body: RequirementPatch):
                 existing.description,
                 ac_snapshot or [],
             )
-            await version_repo.create_version(
-                req_id=req_id.upper(),
-                title_snapshot=existing.title,
-                description_snapshot=existing.description,
-                ac_snapshot=ac_snapshot,
-                content_hash=content_hash,
-                change_type="manual_correction",
-            )
+            await version_repo.create_version({
+                "req_id": req_id.upper(),
+                "title_snapshot": existing.title,
+                "description_snapshot": existing.description,
+                "ac_snapshot": ac_snapshot or [],   # column is non-null (default list)
+                "content_hash": content_hash,
+                # DB CHECK constrains change_type to created|modified|deleted
+                # (schema.sql). A manual correction is a "modified".
+                "change_type": "modified",
+                "changed_by": "operator-correction",
+            })
             await db.commit()
 
             d = _to_dict(existing)
