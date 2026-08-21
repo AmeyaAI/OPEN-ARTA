@@ -15,7 +15,7 @@ python-multipart>=0.0.32
 # Database drivers
 asyncpg>=0.30.0          # PostgreSQL async driver
 neo4j>=6.2.0            # Neo4j graph database
-redis>=5.2.0             # Redis pub/sub + streams
+redis>=8.1.0             # Redis pub/sub + streams
 chromadb>=1.5.9          # Vector store for RAG
 
 # Resilience
