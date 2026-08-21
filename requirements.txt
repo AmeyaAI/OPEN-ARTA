@@ -55,7 +55,7 @@ opentelemetry-exporter-otlp-proto-grpc>=1.27,<2.0
 # so generated gRPC tests (`from .stubs import <n>_pb2, <n>_pb2_grpc`) resolve.
 # grpcio itself already resolves transitively (opentelemetry-exporter-otlp-proto-grpc
 # above); grpcio-tools (protoc) is the missing compiler. Pin the same major line.
-grpcio-tools>=1.60,<2.0
+grpcio-tools>=1.83.0,<2.0
 
 # Test execution
 pytest>=9.1.1
