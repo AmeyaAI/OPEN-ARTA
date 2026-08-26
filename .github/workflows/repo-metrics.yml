@@ -33,11 +33,17 @@ jobs:
           set -euo pipefail
           DATE=$(date -u +%F)
           repo=$(gh api "repos/$R" --jq '{stars:.stargazers_count,forks:.forks_count,watchers:.subscribers_count,open_issues:.open_issues_count}')
-          views=$(gh api "repos/$R/traffic/views" --jq '{count:.count,uniques:.uniques}') \
-            || { echo "::error::traffic API refused GITHUB_TOKEN - create a classic PAT with repo scope as the METRICS_TOKEN secret"; exit 1; }
-          clones=$(gh api "repos/$R/traffic/clones" --jq '{count:.count,uniques:.uniques}')
-          referrers=$(gh api "repos/$R/traffic/popular/referrers" --jq '[.[] | {r:.referrer,c:.count,u:.uniques}]')
-          paths=$(gh api "repos/$R/traffic/popular/paths" --jq '[.[] | {p:.path,c:.count,u:.uniques}]')
+          # Traffic needs push/admin (METRICS_TOKEN). Without it, still write the
+          # snapshot - stars/forks history is valuable on its own - but null the
+          # traffic block and warn, so the gap is visible without daily red runs.
+          if views=$(gh api "repos/$R/traffic/views" --jq '{count:.count,uniques:.uniques}' 2>/dev/null); then
+            clones=$(gh api "repos/$R/traffic/clones" --jq '{count:.count,uniques:.uniques}')
+            referrers=$(gh api "repos/$R/traffic/popular/referrers" --jq '[.[] | {r:.referrer,c:.count,u:.uniques}]')
+            paths=$(gh api "repos/$R/traffic/popular/paths" --jq '[.[] | {p:.path,c:.count,u:.uniques}]')
+          else
+            echo "::warning::traffic API refused the token - snapshot written WITHOUT traffic data. Fix: fine-grained PAT (Administration: read-only on this repo) as the METRICS_TOKEN secret."
+            views=null; clones=null; referrers=null; paths=null
+          fi
           prs=$(gh api "search/issues?q=repo:$R+type:pr+state:open" --jq '.total_count')
           contributors=$(gh api "repos/$R/contributors?per_page=100" --jq 'length')
           downloads=$(gh api "repos/$R/releases" --jq '[.[].assets[].download_count] | add // 0')
