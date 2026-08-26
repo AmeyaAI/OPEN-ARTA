@@ -6,6 +6,9 @@ import starlight from '@astrojs/starlight';
 // The old ameyaai.github.io/OPEN-ARTA/ URL 301-redirects here at GitHub's edge.
 const site = 'https://getarta.dev';
 const base = '';
+// Privacy-first analytics: cookieless, no PII, DNT honored. count.js is
+// self-hosted (public/count.js); only the count endpoint is remote.
+const goatcounter = 'https://arta.goatcounter.com/count';
 
 // https://astro.build/config
 export default defineConfig({
@@ -33,6 +36,7 @@ export default defineConfig({
 				{ tag: 'meta', attrs: { property: 'og:image', content: `${site}${base}/og.png` } },
 				{ tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
 				{ tag: 'meta', attrs: { name: 'twitter:image', content: `${site}${base}/og.png` } },
+				{ tag: 'script', attrs: { 'data-goatcounter': goatcounter, async: true, src: `${base}/count.js` } },
 			],
 			sidebar: [
 				{

@@ -83,3 +83,21 @@ The project's activation metric — *Weekly Verified Runs* (installations that
 executed at least one generated test this week) — is computed entirely from
 Tier-1 `server.heartbeat` ∩ `run.completed`. No identification is required
 for the project to know whether it is useful.
+
+## Website analytics (getarta.dev)
+
+The project website uses GoatCounter, a privacy-first analytics service, with a
+self-hosted copy of its script (no third-party script executes on the site).
+
+Collected per page view: URL path, referrer, campaign parameters, country,
+browser and OS class, screen size, and named clicks on call-to-action buttons.
+Not collected: cookies, persistent identifiers, IP addresses in stored data, or
+any personal information. Unique-visitor counts use a daily-rotating salted
+hash, so visitors cannot be tracked across days. The browser Do-Not-Track
+setting is honored. No consent banner is required because nothing here needs
+consent.
+
+The dashboard is public: https://arta.goatcounter.com
+
+Website analytics are separate from the product telemetry described above and
+never touch an ARTA installation.
