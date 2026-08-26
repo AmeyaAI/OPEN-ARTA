@@ -31,7 +31,7 @@ cd frontend && npm ci && npx tsc --noEmit   # frontend type-check
 ```
 
 Run the full stack locally with `docker compose up -d` (see
-[Getting started](/OPEN-ARTA/docs/getting-started/)).
+[Getting started](/docs/getting-started/)).
 
 ## CLA
 

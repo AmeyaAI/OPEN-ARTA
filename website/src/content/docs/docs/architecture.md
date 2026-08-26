@@ -35,7 +35,7 @@ Requirements (Jira / OpenAPI / docs)     Source code (GitHub)     Live behavior 
 | Component | Where | Role |
 | --- | --- | --- |
 | API engine | `src/api/` | FastAPI backend: projects, requirements, generation, execution dispatch, gates |
-| Agents | `src/agents/` | One module per pipeline responsibility — see [AI agents](/OPEN-ARTA/docs/agents/) |
+| Agents | `src/agents/` | One module per pipeline responsibility — see [AI agents](/docs/agents/) |
 | Prompts | `src/prompts/` | The prompt templates that encode the test-engineering methodology |
 | Frontend | `frontend/` | Next.js 14 dashboard |
 | Postgres | compose service | Primary store: projects, requirements, tests, results |
