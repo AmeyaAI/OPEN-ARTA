@@ -81,7 +81,7 @@ export default function SutRegressionPanel({ projectId }: { projectId: string | 
         <div>
           <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: '#64748b' }}>SUT Regression Trend (R37.6)</p>
           <p className="text-xs mt-1" style={{ color: '#94a3b8' }}>
-            Real backend regressions ARTA detected — is the SUT getting better over time? (MTTR, open P0/P1, resolved).
+            Real backend regressions ARTA detected. Is the SUT getting better over time? (MTTR, open P0/P1, resolved).
           </p>
         </div>
         <span className="text-[10px] px-2 py-1 rounded" style={{ background: '#0a0a14', color: '#94a3b8', border: '1px solid #1e1e3a' }}>

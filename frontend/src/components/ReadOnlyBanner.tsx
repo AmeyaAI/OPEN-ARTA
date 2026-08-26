@@ -18,7 +18,7 @@ export default function ReadOnlyBanner() {
     >
       <span aria-hidden>🔒</span>
       <span>
-        You have <b>{role}</b> access to this project — it&apos;s read-only. Ask a project
+        You have <b>{role}</b> access to this project, which is read-only. Ask a project
         admin for <b>tester</b> access to create, edit, run, or generate.
       </span>
     </div>

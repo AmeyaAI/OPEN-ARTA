@@ -153,7 +153,7 @@ function DatasetCard({
          }}>
       {ds.purpose === 'alternative' && ds.alternative_for && (
         <div className="text-[10px]" style={{ color: '#94a3b8' }}>
-          Alternative for <code style={{ color: '#cbd5e1' }}>{ds.alternative_for}</code> — actual data from the materialised sibling
+          Alternative for <code style={{ color: '#cbd5e1' }}>{ds.alternative_for}</code> (actual data from the materialised sibling)
         </div>
       )}
       <div className="flex items-center gap-2 flex-wrap">

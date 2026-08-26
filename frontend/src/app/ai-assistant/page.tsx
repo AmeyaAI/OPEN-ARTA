@@ -199,7 +199,7 @@ function AIConsole() {
           setImportSuccess(false); setImportModalOpen(false); setImportFile(null)
         }, 2500)
       } else {
-        setImportError('URL / paste import isn’t available here — use the Requirements import on the Test Architecture page.')
+        setImportError('URL / paste import isn’t available here. Use the Requirements import on the Test Architecture page.')
       }
     } catch (e: any) {
       setImportError(e?.message || 'Import failed')
@@ -241,7 +241,7 @@ function AIConsole() {
               <button
                 onClick={() => {
                   setWorkflowStep(0)
-                  setMessages([{ role: 'assistant', content: "I'm ARTA — your AI Test Architect. Use the slash commands above or describe a requirement to get started.\n\nWorkflow has been reset. Ready for a new ATDD cycle." }])
+                  setMessages([{ role: 'assistant', content: "I'm ARTA, your AI Test Architect. Use the slash commands above or describe a requirement to get started.\n\nWorkflow has been reset. Ready for a new ATDD cycle." }])
                   localStorage.removeItem('arta_chat_messages')
                   localStorage.removeItem('arta_workflow_step')
                 }}

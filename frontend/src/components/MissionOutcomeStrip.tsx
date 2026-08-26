@@ -38,7 +38,7 @@ export default function MissionOutcomeStrip({ projectId }: { projectId: string |
     fetchRuns({ project_id: projectId })
       .then(d => {
         const runs = (d as any)?.runs || []
-        if (!runs.length) { if (!cancelled) setMsg('No runs yet — dispatch a run to assess SUT quality.'); return }
+        if (!runs.length) { if (!cancelled) setMsg('No runs yet. Dispatch a run to assess SUT quality.'); return }
         const sorted = [...runs].sort((a, b) => ((b.started_at ?? '').localeCompare(a.started_at ?? '')))
         const rid = sorted[0].run_id || sorted[0].id
         if (cancelled) return
@@ -75,7 +75,7 @@ export default function MissionOutcomeStrip({ projectId }: { projectId: string |
           {runId && <a href={`/run-history?run_id=${runId}`} className="text-[10px]" style={{ color: '#a5b4fc' }}>full report →</a>}
         </div>
       </div>
-      <p className="text-xs mb-4" style={{ color: '#94a3b8' }}>The SUT-quality VERDICT (P4) + whether to TRUST it — CREDIBILITY from the test cases, scripts &amp; execution (P1/P1b/P2).</p>
+      <p className="text-xs mb-4" style={{ color: '#94a3b8' }}>The SUT-quality VERDICT (P4) + whether to TRUST it: CREDIBILITY from the test cases, scripts &amp; execution (P1/P1b/P2).</p>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
         {PILLARS.map(p => {
           const pdata = (mr as any)[p.key] || {}

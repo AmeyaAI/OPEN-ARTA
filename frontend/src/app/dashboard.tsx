@@ -301,24 +301,24 @@ function CoverageDonutChart({ trends }: { trends: DashboardTrends | null }) {
 // ── AI Architect Insights Card ───────────────────────────────────────────────
 
 const AI_INSIGHTS = [
-  { icon: '\u26A0', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', text: 'Requirement coverage gap detected — acceptance criteria uncovered' },
-  { icon: '\u26A0', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', text: 'Flaky test pattern identified — intermittent failures in last 3 runs' },
-  { icon: '\u2713', color: '#10b981', bg: 'rgba(16,185,129,0.1)', text: 'P0 coverage trend improving — up 5% this sprint' },
-  { icon: 'i',      color: '#06b6d4', bg: 'rgba(6,182,212,0.1)',  text: 'Quality gate flagged concerns — review blocking checks before release' },
+  { icon: '\u26A0', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', text: 'Requirement coverage gap detected: acceptance criteria uncovered' },
+  { icon: '\u26A0', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', text: 'Flaky test pattern identified: intermittent failures in last 3 runs' },
+  { icon: '\u2713', color: '#10b981', bg: 'rgba(16,185,129,0.1)', text: 'P0 coverage trend improving, up 5% this sprint' },
+  { icon: 'i',      color: '#06b6d4', bg: 'rgba(6,182,212,0.1)',  text: 'Quality gate flagged concerns. Review blocking checks before release' },
 ]
 
 function AIArchitectInsightsCard({ toast, projectId: _projectId, data }: { toast: any; projectId: string | null; data: DashboardData | null }) {
   const insights = data ? [
     data.coverage_pct < 80
-      ? { icon: '⚠', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', text: `Coverage at ${Math.round(data.coverage_pct)}% — ${data.coverage_pct < 60 ? 'critical gap' : 'below 80% threshold'}. Review uncovered acceptance criteria.` }
-      : { icon: '✓', color: '#10b981', bg: 'rgba(16,185,129,0.1)', text: `Coverage at ${Math.round(data.coverage_pct)}% — above threshold. Maintain momentum.` },
+      ? { icon: '⚠', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', text: `Coverage at ${Math.round(data.coverage_pct)}%: ${data.coverage_pct < 60 ? 'critical gap' : 'below 80% threshold'}. Review uncovered acceptance criteria.` }
+      : { icon: '✓', color: '#10b981', bg: 'rgba(16,185,129,0.1)', text: `Coverage at ${Math.round(data.coverage_pct)}% is above threshold. Maintain momentum.` },
     data.open_defects > 0
-      ? { icon: '⚠', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', text: `${data.open_defects} open defect${data.open_defects !== 1 ? 's' : ''} detected${data.p0_defects > 0 ? ` — ${data.p0_defects} P0 critical` : ''}. Review Defect Intelligence.` }
+      ? { icon: '⚠', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', text: `${data.open_defects} open defect${data.open_defects !== 1 ? 's' : ''} detected${data.p0_defects > 0 ? ` (${data.p0_defects} P0 critical)` : ''}. Review Defect Intelligence.` }
       : { icon: '✓', color: '#10b981', bg: 'rgba(16,185,129,0.1)', text: 'No open defects detected. Quality gate is clean.' },
     data.pass_rate < 85
-      ? { icon: '⚠', color: '#fb7185', bg: 'rgba(251,113,133,0.1)', text: `Pass rate ${Math.round(data.pass_rate)}% is below 85% threshold — check Run History for failure patterns.` }
+      ? { icon: '⚠', color: '#fb7185', bg: 'rgba(251,113,133,0.1)', text: `Pass rate ${Math.round(data.pass_rate)}% is below 85% threshold. Check Run History for failure patterns.` }
       : { icon: '✓', color: '#10b981', bg: 'rgba(16,185,129,0.1)', text: `Pass rate ${Math.round(data.pass_rate)}% is healthy. No regression detected.` },
-    { icon: 'i', color: '#06b6d4', bg: 'rgba(6,182,212,0.1)', text: data.quality_score >= 70 ? `Quality score ${data.quality_score}% — gate eligible for PASS decision.` : `Quality score ${data.quality_score}% — gate may block release. Address P0 coverage gaps.` },
+    { icon: 'i', color: '#06b6d4', bg: 'rgba(6,182,212,0.1)', text: data.quality_score >= 70 ? `Quality score ${data.quality_score}%: gate eligible for PASS decision.` : `Quality score ${data.quality_score}%: gate may block release. Address P0 coverage gaps.` },
   ] : AI_INSIGHTS
   const handleExportPDF = async () => {
     try {
@@ -520,7 +520,7 @@ export default function Dashboard() {
                style={{ background: '#1a0a0a', border: '1px solid #7f1d1d', color: '#fca5a5' }}>
             API unreachable: {error}
             <span className="ml-2" style={{ color: '#94a3b8' }}>
-              — make sure <code>arta-api</code> is running on port 8000
+              Make sure <code>arta-api</code> is running on port 8000
             </span>
           </div>
         )}

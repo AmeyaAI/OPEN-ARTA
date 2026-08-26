@@ -472,7 +472,7 @@ export default function TestExplorerPage() {
     try {
       const fresh = await fetchDiscoveryStatus(currentProjectId, runEnvironment)
       setDiscoveryStatus(fresh)
-      toast.success('Auth refreshed — re-run discovery to auto-fill env vars.')
+      toast.success('Auth refreshed. Re-run discovery to auto-fill env vars.')
     } catch {
       toast.success('Auth refreshed.')
     }
@@ -563,7 +563,7 @@ export default function TestExplorerPage() {
     addTask({ id: tid, type: 'test_execution', label: `Executing ${tool}${requirementId ? ' for ' + requirementId : ''} (${environment})`, result_url: '/run-history' })
     try {
       const result = await executeByTool({ projectId: currentProjectId, tool, environment, suiteType, requirementId })
-      completeTask(tid, { detail: `run ${result.run_id} · ${result.status} — see Run History` })
+      completeTask(tid, { detail: `run ${result.run_id} · ${result.status} (see Run History)` })
       setExecByToolOpen(false)
     } catch (err: unknown) {
       const e = err as { status?: number; message?: string }
@@ -661,7 +661,7 @@ export default function TestExplorerPage() {
         }
       } else if (detail && detail.error === 'auth_state_missing') {
         // R39.4 412 — server-side rejected force=true. Open inline.
-        toast.error('Run Anyway blocked — paste a fresh cookie first.')
+        toast.error('Run Anyway blocked. Paste a fresh cookie first.')
         setShowExtraRefreshAuth(true)
       } else {
         const msg = typeof err?.message === 'string' && err.message
@@ -840,13 +840,13 @@ export default function TestExplorerPage() {
               <div>
                 <div className="text-sm font-semibold" style={{ color: '#fb7185' }}>
                   {!discoveryStatus.auth_state_present
-                    ? 'No fresh SUT auth — Run Suite will refuse'
-                    : `${discoveryStatus.unfilled_count} env vars unfilled — Run Suite will refuse`}
+                    ? 'No fresh SUT auth, so Run Suite will refuse'
+                    : `${discoveryStatus.unfilled_count} env vars unfilled, so Run Suite will refuse`}
                 </div>
                 <div className="text-[11px] mt-0.5" style={{ color: '#94a3b8' }}>
                   {!discoveryStatus.auth_state_present
                     ? `Discovery cannot authenticate against the SUT. Paste a fresh cookie below; discovery will auto-fill the ${discoveryStatus.unfilled_count} placeholder vars.`
-                    : `Auth state present but ${discoveryStatus.unfilled_count} vars are placeholders — re-run discovery to harvest values from the SUT, OR paste a fresh cookie if the existing one is stale.`}
+                    : `Auth state present but ${discoveryStatus.unfilled_count} vars are placeholders. Re-run discovery to harvest values from the SUT, OR paste a fresh cookie if the existing one is stale.`}
                 </div>
               </div>
             </div>
@@ -1050,7 +1050,7 @@ export default function TestExplorerPage() {
                         className="w-full text-left rounded-lg px-3 py-2 text-xs transition hover:ring-1"
                         style={{ background: '#0a0a14', color: '#94a3b8' }}
                       >
-                        {r.requirement_id} — Risk {r.risk_profile.risk_score} ({r.risk_profile.priority})
+                        {r.requirement_id}: Risk {r.risk_profile.risk_score} ({r.risk_profile.priority})
                       </button>
                     ))}
                 </div>
@@ -1287,7 +1287,7 @@ export default function TestExplorerPage() {
                           >
                             {environments.length > 0 ? environments.map(env => (
                               <option key={env.id} value={env.id}>
-                                {env.name || env.id} {env.base_url ? `— ${env.base_url}` : ''}
+                                {env.name || env.id} {env.base_url ? `(${env.base_url})` : ''}
                               </option>
                             )) : (
                               <>
@@ -1463,7 +1463,7 @@ export default function TestExplorerPage() {
                     <span
                       className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded font-medium"
                       style={{ background: 'rgba(245,158,11,0.12)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.25)' }}
-                      title="Script not yet generated — showing preview template"
+                      title="Script not yet generated; showing preview template"
                     >
                       ◈ Preview
                     </span>
@@ -1474,7 +1474,7 @@ export default function TestExplorerPage() {
                     onClick={async () => {
                       try {
                         await requestHeal(selected.test_id || selected.id || '', selected.error || '', undefined, currentProjectId || undefined, selected.title)
-                        toast.success('Healing analysis requested — check Self-Healing page')
+                        toast.success('Healing analysis requested. Check Self-Healing page')
                       } catch { toast.error('Failed to request healing') }
                     }}
                     className="px-2.5 py-1 rounded-lg text-[11px] transition"
@@ -1524,7 +1524,7 @@ export default function TestExplorerPage() {
                       + `&title=${encodeURIComponent(selected.title || '')}`}
                     className="px-2.5 py-1 rounded-lg text-[11px] transition"
                     style={{ background: 'transparent', border: '1px solid rgba(99,102,241,0.4)', color: '#a5b4fc' }}
-                    title="Correct this AI-generated test \u2014 ARTA grounds on your fix so future generations improve"
+                    title="Correct this AI-generated test. ARTA grounds on your fix so future generations improve"
                   >
                     {'\u2728'} Refine with AI
                   </Link>

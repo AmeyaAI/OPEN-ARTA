@@ -85,7 +85,7 @@ export default function HealingPage() {
       // The next page mount will resume polling via the effect below.
       setActionResult({
         id, type: 'error',
-        message: 'Healing run still in progress after 2 minutes — check Run History for status.',
+        message: 'Healing run still in progress after 2 minutes. Check Run History for status.',
       })
     } else {
       setRunStatus(prev => ({ ...prev, [id]: outcome }))
@@ -167,7 +167,7 @@ export default function HealingPage() {
       })
       load()
     } catch {
-      setActionResult({ id, type: 'error', message: 'Approval failed — please try again.' })
+      setActionResult({ id, type: 'error', message: 'Approval failed. Please try again.' })
     }
     setActionLoading(null)
   }
@@ -180,7 +180,7 @@ export default function HealingPage() {
       setActionResult({ id, type: 'rejected', message: 'Proposal rejected and removed from queue.' })
       load()
     } catch {
-      setActionResult({ id, type: 'error', message: 'Rejection failed — please try again.' })
+      setActionResult({ id, type: 'error', message: 'Rejection failed. Please try again.' })
     }
     setActionLoading(null)
   }
@@ -371,7 +371,7 @@ export default function HealingPage() {
                   {selected.ai_reasoning?.includes('AI-verified') && (
                     <span className="inline-block text-[9px] px-1.5 py-0.5 rounded mb-1 font-semibold"
                           style={{ background: 'rgba(16,185,129,0.15)', color: '#34d399', border: '1px solid #10b98130' }}>
-                      ✓ AI-verified — test passed with this fix
+                      ✓ AI-verified: test passed with this fix
                     </span>
                   )}
                   <p className="text-xs" style={{ color: '#94a3b8' }}>{selected.ai_reasoning}</p>
@@ -398,12 +398,12 @@ export default function HealingPage() {
                   </button>
                   {runStatus[selected.id] === 'pass' && (
                     <p className="text-xs text-center" style={{ color: '#34d399' }}>
-                      ✓ Test passed with fix — safe to approve
+                      ✓ Test passed with fix. Safe to approve
                     </p>
                   )}
                   {runStatus[selected.id] === 'fail' && (
                     <p className="text-xs text-center" style={{ color: '#fb7185' }}>
-                      ✗ Test still failing — review the diff
+                      ✗ Test still failing. Review the diff
                     </p>
                   )}
                   {/* Action result confirmation */}

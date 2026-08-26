@@ -88,7 +88,7 @@ export default function ExecuteByToolModal({
                   style={{ background: '#1e1e3a', color: '#94a3b8', opacity: running ? 0.4 : 1 }} aria-label="Close">&#x2715;</button>
         </div>
         <p className="text-xs mb-5" style={{ color: '#94a3b8' }}>
-          Run ONE automation tool (optionally one requirement) — the execute-side counterpart to Regenerate by Tool.
+          Run ONE automation tool (optionally one requirement), the execute-side counterpart to Regenerate by Tool.
           Useful to re-run just k6 / Newman / Playwright without dispatching the whole suite.
         </p>
         <form onSubmit={handleSubmit} className="space-y-5">
@@ -126,8 +126,8 @@ export default function ExecuteByToolModal({
                 <select value={reqId} onChange={e => { setReqId(e.target.value); if (e.target.value) setScope('single') }}
                         disabled={running || scope !== 'single'} className="flex-1 px-3 py-2 rounded-lg text-sm"
                         style={{ background: '#0a0a14', border: '1px solid #1e1e3a', color: scope === 'single' ? '#e2e8f0' : '#475569' }}>
-                  <option value="">— pick a requirement —</option>
-                  {sortedRequirements.map(r => { const key = r.req_id || r.id || ''; return <option key={key} value={key}>{key} — {r.title}</option> })}
+                  <option value="">Select a requirement</option>
+                  {sortedRequirements.map(r => { const key = r.req_id || r.id || ''; return <option key={key} value={key}>{key}: {r.title}</option> })}
                 </select>
               </div>
             </div>
@@ -154,7 +154,7 @@ export default function ExecuteByToolModal({
             <button type="button" onClick={() => { if (!running) onClose() }} disabled={running}
                     className="px-4 py-2 rounded-lg text-sm" style={{ background: '#1e1e3a', color: '#94a3b8', cursor: running ? 'not-allowed' : 'pointer', opacity: running ? 0.6 : 1 }}>Cancel</button>
             <button type="submit" disabled={!canSubmit} className="px-4 py-2 rounded-lg text-sm font-medium"
-                    title={!canWrite ? 'You have read-only (viewer) access — ask a project admin for tester access to execute.' : undefined}
+                    title={!canWrite ? 'You have read-only (viewer) access. Ask a project admin for tester access to execute.' : undefined}
                     style={{ background: canSubmit ? 'linear-gradient(135deg, #7c3aed 0%, #8b5cf6 100%)' : '#3b3b5a', color: '#fff', cursor: canSubmit ? 'pointer' : 'not-allowed', opacity: canSubmit ? 1 : 0.6 }}>
               {running ? '⏳ Executing…' : 'Execute'}
             </button>

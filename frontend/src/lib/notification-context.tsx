@@ -34,14 +34,14 @@ const INITIAL_NOTIFICATIONS: Notification[] = [
   {
     id: 'n1',
     icon: '✓',
-    message: 'Quality gate PASSED for build #1247 — all criteria met',
+    message: 'Quality gate PASSED for build #1247: all criteria met',
     timestamp: '2026-03-17T09:32:00Z',
     read: false,
   },
   {
     id: 'n2',
     icon: '✗',
-    message: 'Test failure: checkout-flow.spec.ts — payment timeout after 30s',
+    message: 'Test failure: checkout-flow.spec.ts (payment timeout after 30s)',
     timestamp: '2026-03-17T09:15:00Z',
     read: false,
   },
@@ -55,7 +55,7 @@ const INITIAL_NOTIFICATIONS: Notification[] = [
   {
     id: 'n4',
     icon: '▼',
-    message: 'Coverage dropped to 76.2% on feature/auth-refactor — below 80% threshold',
+    message: 'Coverage dropped to 76.2% on feature/auth-refactor, below the 80% threshold',
     timestamp: '2026-03-16T22:10:00Z',
     read: false,
   },

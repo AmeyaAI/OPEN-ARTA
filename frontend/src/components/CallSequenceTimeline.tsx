@@ -104,7 +104,7 @@ export default function CallSequenceTimeline({ runId }: Props) {
         style={{ background: '#0f0f23', border: '1px solid #1e1e3a', color: '#64748b' }}
       >
         No step data captured for this run. Step-level recording requires
-        Phase E (chain-aware execution) — older runs don't carry it.
+        Phase E (chain-aware execution). Older runs don't carry it.
       </div>
     )
   }

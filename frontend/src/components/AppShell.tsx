@@ -163,7 +163,7 @@ function ServiceHealthBanner() {
     >
       <span style={{ color: '#ef4444' }}>●</span>
       <span>
-        Service degraded — {failing.join(', ')} unreachable.
+        Service degraded: {failing.join(', ')} unreachable.
         Some features may be unavailable.
       </span>
       <a href="/admin" className="ml-auto underline" style={{ color: '#fca5a5' }}>
@@ -204,7 +204,7 @@ function GlobalProgressBar() {
           </span>
           {task.detail && (
             <span className="text-[10px]" style={{ color: '#94a3b8' }}>
-              — {task.detail}
+              ({task.detail})
             </span>
           )}
         </div>

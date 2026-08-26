@@ -383,7 +383,7 @@ export default function TraceabilityPage() {
         return (
           <div className="mb-6 rounded-xl p-3" style={{ background: '#12121f', border: '1px solid #1e1e3a' }}>
             <div className="text-[10px] uppercase tracking-widest mb-2" style={{ color: '#64748b' }}>
-              Chain coverage gaps — where gen → execute → report is incomplete
+              Chain coverage gaps: where gen → execute → report is incomplete
             </div>
             <div className="flex items-stretch gap-2">
               <Cell n={unplanned} label="reqs not risk-scored" href="/architecture" color="#f59e0b" />

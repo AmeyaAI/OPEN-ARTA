@@ -271,7 +271,7 @@ export default function RefreshAuthModal({
         }
       } catch (parseErr) {
         setFullCaptureError(
-          'Could not parse Full Capture JSON — it must be a JSON object with localStorage/sessionStorage/cookies keys. Ignoring this field.',
+          'Could not parse Full Capture JSON. It must be a JSON object with localStorage/sessionStorage/cookies keys. Ignoring this field.',
         )
         // Don't fail the submit; the main cookie path still works.
         fullCapture = {}
@@ -343,7 +343,7 @@ export default function RefreshAuthModal({
               Tests will cascade-skip until refreshed.</span>
           )}
           {initialState?.status === 'missing' && (
-            <span>No storage-state file yet — first-run setup. Login to capture session.</span>
+            <span>No storage-state file yet (first-run setup). Login to capture session.</span>
           )}
           {initialState?.status === 'unreadable' && (
             <span>Storage-state file is corrupt: {initialState.message}</span>
@@ -357,7 +357,7 @@ export default function RefreshAuthModal({
         <div className="space-y-3 text-sm" style={{ color: '#cbd5e1' }}>
           <div className="rounded-lg p-3" style={{ background: '#0a0a14', border: '1px solid #1e1e3a' }}>
             <div className="text-xs uppercase tracking-wider mb-2" style={{ color: '#94a3b8' }}>
-              Step 1 — Login to {expectedHost ?? 'SUT'}
+              Step 1: Login to {expectedHost ?? 'SUT'}
             </div>
             <a
               href={refreshUrl}
@@ -376,7 +376,7 @@ export default function RefreshAuthModal({
           {/* Step 2 — bookmarklet (V4 affordance) */}
           <div className="rounded-lg p-3" style={{ background: '#0a0a14', border: '1px solid #1e1e3a' }}>
             <div className="text-xs uppercase tracking-wider mb-2" style={{ color: '#94a3b8' }}>
-              Step 2 — Click the ARTA bookmarklet on the SUT page
+              Step 2: Click the ARTA bookmarklet on the SUT page
             </div>
             <a
               href={BOOKMARKLET_JS}
@@ -391,7 +391,7 @@ export default function RefreshAuthModal({
               First time? Drag this to your bookmarks bar (or right-click → "Bookmark this link").
             </span>
             <div className="text-[10px] mt-2" style={{ color: '#64748b' }}>
-              On the SUT post-login page, click this bookmark — it copies the cookie + refresh-token
+              On the SUT post-login page, click this bookmark. It copies the cookie + refresh-token
               to your clipboard.
             </div>
           </div>
@@ -399,7 +399,7 @@ export default function RefreshAuthModal({
           {/* Step 3 — paste (V7: direct-fields path is now the default) */}
           <div className="rounded-lg p-3" style={{ background: '#0a0a14', border: '1px solid #1e1e3a' }}>
             <div className="text-xs uppercase tracking-wider mb-2" style={{ color: '#94a3b8' }}>
-              Step 3 — Paste cookie + refresh-token
+              Step 3: Paste cookie + refresh-token
             </div>
             {expectedCookieName && (
               <div className="text-[11px] mb-2" style={{ color: '#94a3b8' }}>
@@ -429,7 +429,7 @@ export default function RefreshAuthModal({
             />
 
             <label className="block text-[11px] mt-3" style={{ color: '#94a3b8' }}>
-              Refresh token <span className="text-[10px]" style={{ color: '#64748b' }}>(optional — Local Storage → refresh-token)</span>
+              Refresh token <span className="text-[10px]" style={{ color: '#64748b' }}>(optional: Local Storage → refresh-token)</span>
             </label>
             <textarea
               value={directRefresh}
@@ -492,7 +492,7 @@ export default function RefreshAuthModal({
             <details className="mt-3">
               <summary className="cursor-pointer text-xs"
                        style={{ color: '#94a3b8', fontFamily: 'Space Mono, monospace' }}>
-                Advanced — Full Capture (optional, fixes SPA login redirects)
+                Advanced: Full Capture (optional, fixes SPA login redirects)
               </summary>
               <div className="mt-2 rounded-lg p-3 text-[11px]"
                    style={{ background: '#0a0a14', border: '1px solid #1e1e3a', color: '#94a3b8' }}>
@@ -533,7 +533,7 @@ export default function RefreshAuthModal({
               )}
               {fullCaptureJSON.trim() && !fullCaptureError && (
                 <div className="mt-1 text-[10px]" style={{ color: '#86efac' }}>
-                  ✓ Full Capture queued — will submit with the cookie below
+                  ✓ Full Capture queued. It will submit with the cookie below
                 </div>
               )}
             </details>
@@ -544,8 +544,8 @@ export default function RefreshAuthModal({
             <div className="rounded-lg p-3 text-xs"
                  style={{ background: '#062114', border: '1px solid #14532d', color: '#86efac' }}>
               ✓ Parsed: <code>{parsed.name}</code> from <code>{parsed.host}</code>
-              {parsedExpiry && <> — valid until <code>{parsedExpiry}</code></>}
-              {!parsedExpiry && <> — opaque token (server will accept)</>}
+              {parsedExpiry && <> · valid until <code>{parsedExpiry}</code></>}
+              {!parsedExpiry && <> · opaque token (server will accept)</>}
               {parsed.refresh && <> · refresh-token included</>}
             </div>
           )}
@@ -560,7 +560,7 @@ export default function RefreshAuthModal({
           {phase === 'done' && (
             <div className="rounded-lg p-3 text-xs"
                  style={{ background: '#062114', border: '1px solid #14532d', color: '#86efac' }}>
-              ✓ Storage state refreshed — running suite now…
+              ✓ Storage state refreshed. Running suite now…
             </div>
           )}
 

@@ -237,7 +237,7 @@ export default function LLMSettingsPage() {
                 <select value={model} onChange={(e) => setModel(e.target.value)}
                         className="w-full px-3 py-2 rounded-lg text-sm"
                         style={{ background: '#0d0d1a', color: '#e2e8f0', border: '1px solid #1e1e3a' }}>
-                  <option value="">— pick a model —</option>
+                  <option value="">Select a model</option>
                   {availableModels.map((m) => (
                     <option key={m} value={m}>{m}</option>
                   ))}
@@ -277,7 +277,7 @@ export default function LLMSettingsPage() {
                 <div className="text-xs" style={{ color: '#64748b' }}>
                   Status: {settings.available.claude_code.reachable
                     ? `✓ Available (${settings.available.claude_code.version})`
-                    : '✗ CLI not found — mount the host binary or pick a different provider'}
+                    : '✗ CLI not found. Mount the host binary or pick a different provider'}
                 </div>
               </div>
             )}

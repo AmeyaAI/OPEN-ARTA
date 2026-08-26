@@ -108,7 +108,7 @@ export default function RunPipelineModal({ open, onClose }: RunPipelineModalProp
         tools: ['playwright', 'newman', 'k6'],
         ...(force ? { force: true } : {}),
       } as any)
-      toast.success(`Pipeline started — run_id: ${result.run_id}`)
+      toast.success(`Pipeline started (run_id: ${result.run_id})`)
       onClose()
     } catch (err: any) {
       // R36.2 — surface the 409 config_incomplete payload distinctly
@@ -148,7 +148,7 @@ export default function RunPipelineModal({ open, onClose }: RunPipelineModalProp
       const fresh2 = await fetchEnvVariables(currentProjectId, environment)
       setUnfilledCount(fresh2.needs_attention?.length || 0)
       setUnfilledNames(fresh2.needs_attention || [])
-      toast.success('Auth refreshed — re-run discovery to auto-fill vars.')
+      toast.success('Auth refreshed. Re-run discovery to auto-fill vars.')
     } catch {
       toast.success('Auth refreshed.')
     }
@@ -202,11 +202,11 @@ export default function RunPipelineModal({ open, onClose }: RunPipelineModalProp
             <span style={{ color: '#fb7185', fontSize: 20 }}>⛔</span>
             <div className="flex-1">
               <div className="text-sm font-semibold" style={{ color: '#fb7185' }}>
-                No fresh auth state — discovery harvested 0 vars
+                No fresh auth state: discovery harvested 0 vars
               </div>
               <div className="text-[11px] mt-1" style={{ color: '#94a3b8' }}>
                 {discoveryStatus.unfilled_count > 0
-                  ? `The ${discoveryStatus.unfilled_count} unfilled vars below are the consequence — they would auto-fill if the probe could reach authenticated endpoints. `
+                  ? `The ${discoveryStatus.unfilled_count} unfilled vars below are the consequence: they would auto-fill if the probe could reach authenticated endpoints. `
                   : 'Discovery cannot authenticate against the SUT. '}
                 {discoveryStatus.cookie_status === 'redacted_placeholder'
                   ? 'Cookie in projects.json is a redacted placeholder; '
@@ -340,7 +340,7 @@ export default function RunPipelineModal({ open, onClose }: RunPipelineModalProp
                 className="px-3 py-2 rounded-lg text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ color: '#94a3b8', border: '1px solid #1e1e3a' }}
                 title={!canWrite
-                  ? 'You have read-only (viewer) access — ask a project admin for tester access to run.'
+                  ? 'You have read-only (viewer) access. Ask a project admin for tester access to run.'
                   : 'Run despite unfilled vars; most items will be BLOCKED'}
               >
                 {loading ? 'Running…' : 'Run Anyway'}
@@ -362,7 +362,7 @@ export default function RunPipelineModal({ open, onClose }: RunPipelineModalProp
               disabled={loading || !canWrite}
               className="px-5 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
               title={!canWrite
-                ? 'You have read-only (viewer) access — ask a project admin for tester access to run.'
+                ? 'You have read-only (viewer) access. Ask a project admin for tester access to run.'
                 : undefined}
               style={{
                 background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',

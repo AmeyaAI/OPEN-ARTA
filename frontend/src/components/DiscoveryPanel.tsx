@@ -264,7 +264,7 @@ export default function DiscoveryPanel({ projectId, onRefreshTriggered }: Props)
           className="px-5 py-3 text-xs"
           style={{ borderTop: '1px solid #1e1e3a', color: '#94a3b8' }}
         >
-          This project is API-only — Stage 2.5 is intentionally skipped. Env
+          This project is API-only, so Stage 2.5 is intentionally skipped. Env
           vars come from OpenAPI + operator entry.
         </div>
       )}
@@ -282,7 +282,7 @@ export default function DiscoveryPanel({ projectId, onRefreshTriggered }: Props)
           className="px-5 py-3 text-xs"
           style={{ borderTop: '1px solid #1e1e3a', color: '#fde68a' }}
         >
-          Pending — Stage 2.5 will fire on the next pipeline run.
+          Pending: Stage 2.5 will fire on the next pipeline run.
         </div>
       )}
     </div>

@@ -688,7 +688,7 @@ export default function SettingsPage() {
                               checked={cacheEnabled}
                               onChange={(e) => setCacheEnabled(e.target.checked)}
                               className="w-3 h-3" />
-                            <span>LLM output cache (Redis) — replay identical regens at zero token cost</span>
+                            <span>LLM output cache (Redis): replay identical regens at zero token cost</span>
                           </label>
                         </div>
                         {cacheEnabled && (
@@ -1308,7 +1308,7 @@ function EnvironmentsTab({ projectId, project, onSave }: { projectId: string | n
             return locked ? (
               <div className="mb-3 text-[11px] p-2 rounded" style={{
                 background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.3)', color: '#a7f3d0' }}>
-                🔒 This SUT&apos;s auth is <b>solved &amp; locked</b> — a durable refresh is configured, so ARTA keeps
+                🔒 This SUT&apos;s auth is <b>solved &amp; locked</b>: a durable refresh is configured, so ARTA keeps
                 the token fresh automatically and discovery won&apos;t re-derive it. Editing here is usually unnecessary;
                 use the <b>Refresh Auth</b> paste modal to update the live token.
               </div>
@@ -1462,7 +1462,7 @@ function EnvironmentsTab({ projectId, project, onSave }: { projectId: string | n
             <div className="text-[10px] font-semibold uppercase tracking-wider mb-3" style={{ color: '#94a3b8' }}>
               Variable Values
               <span className="ml-2 text-[9px] font-normal normal-case" style={{ color: '#64748b' }}>
-                — fill placeholders to unblock dispatched tests (R29.3 BLOCKED rows)
+                Fill placeholders to unblock dispatched tests (R29.3 BLOCKED rows)
               </span>
             </div>
             <EnvVariablesEditor projectId={projectId} envName={selectedEnv} />

@@ -87,7 +87,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       if (stored) {
         const parsed: Task[] = JSON.parse(stored)
         // Mark any "running" tasks as failed (stale from previous session)
-        setTasks(parsed.map(t => t.status === 'running' ? { ...t, status: 'failed' as const, detail: 'Interrupted — app restarted' } : t))
+        setTasks(parsed.map(t => t.status === 'running' ? { ...t, status: 'failed' as const, detail: 'Interrupted (app restarted)' } : t))
       }
     } catch {}
   }, [])
@@ -130,7 +130,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       // Fire notification
       notifyRef.current({
         icon: '✓',
-        message: `${updated.label} — ${opts?.detail || 'completed'}`,
+        message: `${updated.label}: ${opts?.detail || 'completed'}`,
         timestamp: updated.finished_at!,
       })
       return updated
@@ -148,7 +148,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       }
       notifyRef.current({
         icon: '✗',
-        message: `${updated.label} — ${detail || 'failed'}`,
+        message: `${updated.label}: ${detail || 'failed'}`,
         timestamp: updated.finished_at!,
       })
       return updated

@@ -242,12 +242,12 @@ export default function RegenerateByToolModal({
                     color: scope === 'single' ? '#e2e8f0' : '#475569',
                   }}
                 >
-                  <option value="">— pick a requirement —</option>
+                  <option value="">Select a requirement</option>
                   {sortedRequirements.map(r => {
                     const key = r.req_id || r.id || ''
                     return (
                       <option key={key} value={key}>
-                        {key} — {r.title}
+                        {key}: {r.title}
                       </option>
                     )
                   })}
@@ -295,7 +295,7 @@ export default function RegenerateByToolModal({
             <button
               type="submit"
               disabled={!canSubmit}
-              title={!canWrite ? 'You have read-only (viewer) access — ask a project admin for tester access to regenerate.' : undefined}
+              title={!canWrite ? 'You have read-only (viewer) access. Ask a project admin for tester access to regenerate.' : undefined}
               className="px-4 py-2 rounded-lg text-sm font-medium"
               style={{
                 background: canSubmit
