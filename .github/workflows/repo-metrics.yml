@@ -50,8 +50,9 @@ jobs:
           site='null'
           if [ -n "${GOATCOUNTER_TOKEN:-}" ]; then
             site=$(curl -fsS -H "Authorization: Bearer $GOATCOUNTER_TOKEN" \
+              -H "Content-Type: application/json" \
               "https://arta.goatcounter.com/api/v0/stats/total?start=$(date -u -d '7 days ago' +%F)&end=$DATE" \
-              || echo 'null')
+              | jq -c '{total,total_events,total_utc}' || echo 'null')
           fi
           jq -cn --arg date "$DATE" \
             --argjson repo "$repo" --argjson views "$views" --argjson clones "$clones" \
