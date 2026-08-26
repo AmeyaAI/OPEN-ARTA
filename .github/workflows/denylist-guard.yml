@@ -23,7 +23,7 @@ jobs:
           while read -r f; do
             [ -f "$f" ] || continue
             m=$(grep -nHiE -f "$RUNNER_TEMP/dl.txt" "$f" 2>/dev/null \
-                 | grep -viE 'dpod-labs-private-limited|dpod labs|(api\.)?github\.com/(repos/)?AmeyaAI|ameyaai\.github\.io' | cut -d: -f1,2 || true)
+                 | grep -viE 'dpod-labs-private-limited|dpod labs|ameyaai' | cut -d: -f1,2 || true)
             [ -n "$m" ] && { echo "denylist hit: $m"; fail=1; }
           done < <(git ls-files)
           rm -f "$RUNNER_TEMP/dl.txt"
