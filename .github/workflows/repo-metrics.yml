@@ -1,0 +1,76 @@
+# Daily snapshot of repo + site metrics onto the orphan `metrics` branch
+# (same committed-data-branch pattern as `cla-signatures`).
+#
+# Why: GitHub's traffic API only retains 14 days; without snapshots the
+# founder's growth history is lost. One JSON line per day in
+# repo-metrics.jsonl keeps the repo itself the durable system of record.
+#
+# Tokens:
+# - Traffic endpoints need push/admin access. GITHUB_TOKEN usually suffices
+#   in-repo; if it 403s, create a classic PAT with `repo` scope as the
+#   METRICS_TOKEN secret (the job fails loudly with that instruction).
+# - GOATCOUNTER_TOKEN (optional, read-only API token from
+#   arta.goatcounter.com settings) also archives site view totals here, so
+#   site history survives independently of the hosted analytics service.
+name: Repo metrics
+on:
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Collect metrics
+        env:
+          GH_TOKEN: ${{ secrets.METRICS_TOKEN || secrets.GITHUB_TOKEN }}
+          GOATCOUNTER_TOKEN: ${{ secrets.GOATCOUNTER_TOKEN }}
+          R: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          DATE=$(date -u +%F)
+          repo=$(gh api "repos/$R" --jq '{stars:.stargazers_count,forks:.forks_count,watchers:.subscribers_count,open_issues:.open_issues_count}')
+          views=$(gh api "repos/$R/traffic/views" --jq '{count:.count,uniques:.uniques}') \
+            || { echo "::error::traffic API refused GITHUB_TOKEN - create a classic PAT with repo scope as the METRICS_TOKEN secret"; exit 1; }
+          clones=$(gh api "repos/$R/traffic/clones" --jq '{count:.count,uniques:.uniques}')
+          referrers=$(gh api "repos/$R/traffic/popular/referrers" --jq '[.[] | {r:.referrer,c:.count,u:.uniques}]')
+          paths=$(gh api "repos/$R/traffic/popular/paths" --jq '[.[] | {p:.path,c:.count,u:.uniques}]')
+          prs=$(gh api "search/issues?q=repo:$R+type:pr+state:open" --jq '.total_count')
+          contributors=$(gh api "repos/$R/contributors?per_page=100" --jq 'length')
+          downloads=$(gh api "repos/$R/releases" --jq '[.[].assets[].download_count] | add // 0')
+          site='null'
+          if [ -n "${GOATCOUNTER_TOKEN:-}" ]; then
+            site=$(curl -fsS -H "Authorization: Bearer $GOATCOUNTER_TOKEN" \
+              "https://arta.goatcounter.com/api/v0/stats/total?start=$(date -u -d '7 days ago' +%F)&end=$DATE" \
+              || echo 'null')
+          fi
+          jq -cn --arg date "$DATE" \
+            --argjson repo "$repo" --argjson views "$views" --argjson clones "$clones" \
+            --argjson referrers "$referrers" --argjson paths "$paths" \
+            --argjson open_prs "$prs" --argjson contributors "$contributors" \
+            --argjson release_downloads "$downloads" --argjson site_7d "$site" \
+            '{date:$date,repo:$repo,traffic:{views:$views,clones:$clones,referrers:$referrers,paths:$paths},open_prs:$open_prs,contributors:$contributors,release_downloads:$release_downloads,site_7d:$site_7d}' \
+            > /tmp/row.json
+          cat /tmp/row.json
+      - name: Append to metrics branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch origin metrics 2>/dev/null; then
+            git checkout -B metrics origin/metrics
+          else
+            git checkout --orphan metrics
+            git rm -rfq . || true
+            echo "# Daily repo + site metric snapshots (see .github/workflows/repo-metrics.yml)" > README.md
+            git add README.md
+          fi
+          cat /tmp/row.json >> repo-metrics.jsonl
+          git add repo-metrics.jsonl
+          git commit -m "metrics: $(date -u +%F)"
+          git push origin metrics
