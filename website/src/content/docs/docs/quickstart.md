@@ -3,7 +3,7 @@ title: Your first test run
 description: From an empty ARTA install to a truthful test report — create a project, import requirements, generate grounded tests, and run them.
 ---
 
-This walkthrough assumes ARTA is [installed and running](/OPEN-ARTA/docs/getting-started/)
+This walkthrough assumes ARTA is [installed and running](/docs/getting-started/)
 at http://localhost:38088. The flow below is the product's core loop and runs
 entirely in the UI.
 
@@ -62,7 +62,7 @@ inspect, edit, and version.
 
 ## Next
 
-- [Core concepts](/OPEN-ARTA/docs/concepts/) — the ideas behind grounding and
+- [Core concepts](/docs/concepts/) — the ideas behind grounding and
   truthful reporting
-- [Configuration](/OPEN-ARTA/docs/configuration/) — providers, Jira defect
+- [Configuration](/docs/configuration/) — providers, Jira defect
   filing, telemetry

@@ -2,13 +2,14 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
-const site = 'https://ameyaai.github.io';
-const base = '/OPEN-ARTA';
+// Custom domain (apex) — served at the root, so no base path.
+// The old ameyaai.github.io/OPEN-ARTA/ URL 301-redirects here at GitHub's edge.
+const site = 'https://getarta.dev';
+const base = '';
 
 // https://astro.build/config
 export default defineConfig({
 	site,
-	base,
 	trailingSlash: 'ignore',
 	integrations: [
 		starlight({

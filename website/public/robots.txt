@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://ameyaai.github.io/OPEN-ARTA/sitemap-index.xml
+Sitemap: https://getarta.dev/sitemap-index.xml

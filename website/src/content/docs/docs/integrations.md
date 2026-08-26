@@ -58,4 +58,4 @@ ARTA's problem, counted against ARTA.
 
 OpenAPI specs and plain documents also work as requirement sources. New
 requirement-source connectors are one of the explicitly invited
-[first contributions](/OPEN-ARTA/docs/contributing/).
+[first contributions](/docs/contributing/).

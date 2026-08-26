@@ -3,7 +3,7 @@ title: Installation
 description: The full ARTA installation — Docker Compose services, environment configuration, LLM providers, first login, and telemetry controls.
 ---
 
-This page covers everything the [quickstart](/OPEN-ARTA/docs/getting-started/)
+This page covers everything the [quickstart](/docs/getting-started/)
 glossed over. The single source of truth for configuration is
 [`.env.example`](https://github.com/AmeyaAI/OPEN-ARTA/blob/main/.env.example)
 in the repository — every variable is documented inline there.

@@ -17,7 +17,7 @@ cloud account, no data leaving your network.
   ```
 
   Or skip Ollama and use a cloud LLM key (Anthropic, OpenAI, Google Gemini) —
-  see [Configuration](/OPEN-ARTA/docs/configuration/).
+  see [Configuration](/docs/configuration/).
 
 ## Quickstart
 
@@ -51,8 +51,8 @@ Pick one of two paths **before** the first start:
 
 ## Next steps
 
-- [Your first test run](/OPEN-ARTA/docs/quickstart/) — from a project to a
+- [Your first test run](/docs/quickstart/) — from a project to a
   truthful report. The fastest first win is the API-test path from an OpenAPI
   spec.
-- [Installation](/OPEN-ARTA/docs/installation/) — everything the quickstart
+- [Installation](/docs/installation/) — everything the quickstart
   glossed over: services, ports, environment, telemetry.
