@@ -93,12 +93,24 @@ network calls (there's a unit test that proves it).
 - [Telemetry](docs/TELEMETRY.md) — the complete field list
 - [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md) · [Trademarks](TRADEMARKS.md)
 
+## Your first contribution
+
+New here? Start with a documentation fix. Improve a sentence in any Markdown
+file, open a pull request, and you're a contributor — same fork → branch →
+PR workflow every other change uses, with none of the risk:
+
+```bash
+gh repo fork AmeyaAI/OPEN-ARTA --clone
+git checkout -b docs/your-change
+# edit, commit, push
+gh pr create
+```
+
+On your first PR the CLA Assistant will ask you to sign with a single comment —
+your copyright stays yours ([CONTRIBUTING.md](CONTRIBUTING.md#contributor-license-agreement)).
+Ready for more? See [good first contributions](CONTRIBUTING.md#good-first-contributions).
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE). © 2026 DPOD Labs Private Limited.
 The `ee/` directory is reserved for the commercial edition (see [ee/README.md](ee/README.md)).
-
-
--- 
-
-Changing or adding a line in the md file for a test push, pull and become a contributor.
