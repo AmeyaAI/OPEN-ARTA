@@ -226,7 +226,7 @@ export default function RunHistoryPage() {
         {error && (
           <div className="mb-6 px-4 py-3 rounded-lg text-sm"
                style={{ background: '#1a0a0a', border: '1px solid #7f1d1d', color: '#fca5a5' }}>
-            {error} — ensure <code>arta-api</code> is running and <code>NEXT_PUBLIC_ARTA_API_KEY</code> is set
+            {error}. Ensure <code>arta-api</code> is running and <code>NEXT_PUBLIC_ARTA_API_KEY</code> is set
           </div>
         )}
 

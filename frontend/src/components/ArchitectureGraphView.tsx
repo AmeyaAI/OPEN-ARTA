@@ -104,7 +104,7 @@ export default function ArchitectureGraphView({ projectId }: { projectId: string
       <div className="flex items-center gap-3 mb-3">
         <h3 className="text-sm font-semibold" style={{ color: '#e2e8f0' }}>SUT Architecture</h3>
         <span className="text-[10px]" style={{ color: '#64748b' }}>
-          what ARTA discovered about this SUT — API endpoints colored by grounding depth
+          what ARTA discovered about this SUT: API endpoints colored by grounding depth
         </span>
       </div>
 

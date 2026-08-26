@@ -118,7 +118,7 @@ export default function LiveExecutionFeed({
             <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: '#6366f1' }} />
           )}
           <span className="text-xs font-semibold" style={{ color: isConnected ? '#a5b4fc' : '#64748b' }}>
-            {isConnected ? 'Live' : 'Complete'} — {runId}
+            {isConnected ? 'Live' : 'Complete'}: {runId}
           </span>
           <span className="text-xs font-mono" style={{ color: '#94a3b8' }}>{fmtElapsed}</span>
         </div>

@@ -675,7 +675,7 @@ export default function ArchitecturePage() {
     // Set expectation up-front — for P0 reqs with chunked Newman generation,
     // total wall time is typically 3-5 min. Without this the user sees no
     // feedback for several minutes and assumes the click did nothing.
-    toast.info(`Generating tests for ${selectedReqId}${forcedSuffix} — this can take 3-5 min for P0 reqs`)
+    toast.info(`Generating tests for ${selectedReqId}${forcedSuffix}. This can take 3-5 min for P0 reqs`)
     try {
       // Per-req button passes its own explicit `force` flag (no longer
       // depends on the global checkbox state — that checkbox now governs
@@ -907,7 +907,7 @@ export default function ArchitecturePage() {
                 // this project, redirect the user's attention to the existing
                 // progress instead of firing a doomed second request.
                 if (generating || genProgress) {
-                  toast.error('A generation job is already running — see progress on the button')
+                  toast.error('A generation job is already running. See progress on the button')
                   return
                 }
                 // F11-1: force is now driven by the explicit checkbox the
@@ -943,7 +943,7 @@ export default function ArchitecturePage() {
                         const skipped = status.skipped ?? 0
                         const tests = status.total_tests_generated ?? 0
                         const detail = (skipped > 0 && tests === 0)
-                          ? `All ${status.total_requirements} requirements unchanged — no regeneration needed`
+                          ? `All ${status.total_requirements} requirements unchanged; no regeneration needed`
                           : `${tests} tests for ${status.total_requirements} requirements${skipped > 0 ? ` (${skipped} unchanged)` : ''}`
                         completeTask(tid, { detail })
                         if (skipped > 0 && tests === 0) {
@@ -1005,7 +1005,7 @@ export default function ArchitecturePage() {
                 if (!generating) return '\u2726 Generate All Tests'
                 if (!genProgress) return 'Starting generation...'
                 if (genProgress.rateLimitReset && genProgress.rateLimitReset > Date.now() / 1000) {
-                  return `\u23F3 Rate limited — retrying in ${Math.ceil(genProgress.rateLimitReset - Date.now() / 1000)}s`
+                  return `\u23F3 Rate limited, retrying in ${Math.ceil(genProgress.rateLimitReset - Date.now() / 1000)}s`
                 }
                 // F11-3: per-stage label so the user sees activity within each requirement
                 const stageLabels: Record<string, string> = {
@@ -1242,10 +1242,10 @@ export default function ArchitecturePage() {
                 className="w-full px-3 py-2 rounded-lg text-sm mb-2 outline-none"
                 style={{ background: '#0a0a14', border: '1px solid #1e1e3a', color: '#e2e8f0' }}
               >
-                <option value="P0">P0 — Critical</option>
-                <option value="P1">P1 — High</option>
-                <option value="P2">P2 — Medium</option>
-                <option value="P3">P3 — Low</option>
+                <option value="P0">P0: Critical</option>
+                <option value="P1">P1: High</option>
+                <option value="P2">P2: Medium</option>
+                <option value="P3">P3: Low</option>
               </select>
               <textarea
                 placeholder="Acceptance criteria (one per line)"
@@ -1292,7 +1292,7 @@ export default function ArchitecturePage() {
             <div className="rounded-xl p-6 text-center" style={{ background: '#12121f', border: '1px solid #1e1e3a' }}>
               <div className="text-3xl mb-3">{'\u{1F4CB}'}</div>
               <p className="text-sm" style={{ color: '#64748b' }}>
-                No requirements ingested yet — upload a document or sync from Jira to get started
+                No requirements ingested yet. Upload a document or sync from Jira to get started
               </p>
             </div>
           )}
@@ -1454,7 +1454,7 @@ export default function ArchitecturePage() {
                           if (!q || !bm) return null
                           return (
                             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                                  title={`clarity ${q.score}/100${q.flags?.length ? ` — ${q.flags.slice(0, 3).join('; ')}` : ''}`}
+                                  title={`clarity ${q.score}/100${q.flags?.length ? `: ${q.flags.slice(0, 3).join('; ')}` : ''}`}
                                   style={{ background: `${bm.color}18`, color: bm.color }}>
                               clarity: {bm.label} {q.score}
                             </span>
@@ -1467,7 +1467,7 @@ export default function ArchitecturePage() {
                         {getQuality(selectedReq) && getQuality(selectedReq)!.band !== 'clear' && (
                           <a href={`/ai-assistant?requirement_id=${encodeURIComponent(getReqId(selectedReq))}`}
                              className="px-3 py-1.5 rounded-lg text-xs font-medium transition"
-                             title="Refine this requirement's acceptance criteria — corrections become durable grounding"
+                             title="Refine this requirement's acceptance criteria; corrections become durable grounding"
                              style={{ background: 'transparent', border: '1px solid rgba(99,102,241,0.4)', color: '#a5b4fc' }}>
                             {'✨'} Refine with AI
                           </a>
@@ -1683,17 +1683,17 @@ export default function ArchitecturePage() {
                 if (coverage === 0) {
                   bannerBg = 'rgba(251,113,133,0.08)'
                   bannerBorder = '#7f1d1d'
-                  bannerText = `0% covered \u2014 no tests generated yet`
+                  bannerText = `0% covered: no tests generated yet`
                   bannerColor = '#fb7185'
                 } else if (coverage < 80) {
                   bannerBg = 'rgba(245,158,11,0.08)'
                   bannerBorder = '#78350f'
-                  bannerText = `${coverage}% covered \u2014 ${coveredCount} of ${acCount} acceptance criteria have tests`
+                  bannerText = `${coverage}% covered: ${coveredCount} of ${acCount} acceptance criteria have tests`
                   bannerColor = '#f59e0b'
                 } else {
                   bannerBg = 'rgba(16,185,129,0.08)'
                   bannerBorder = '#065f46'
-                  bannerText = `${coverage}% covered \u2014 ${coveredCount} of ${acCount} acceptance criteria have tests`
+                  bannerText = `${coverage}% covered: ${coveredCount} of ${acCount} acceptance criteria have tests`
                   bannerColor = '#10b981'
                 }
                 return (
@@ -1719,7 +1719,7 @@ export default function ArchitecturePage() {
                       Tests may be outdated
                     </p>
                     <p className="text-xs mb-2" style={{ color: '#94a3b8' }}>
-                      This requirement was modified after tests were generated — tests may need to be re-generated.
+                      This requirement was modified after tests were generated, so tests may need to be re-generated.
                     </p>
                     <button
                       onClick={() => handleGenerateTests()}
@@ -1790,7 +1790,7 @@ export default function ArchitecturePage() {
                           <span className="text-sm truncate" style={{ color: '#e2e8f0' }}>{ac.statement}</span>
                           {getQuality(selectedReq)?.ac_flags?.includes(ac.id) && (
                             <span className="text-[10px] font-medium px-2 py-0.5 rounded-full flex-shrink-0"
-                                  title="No measurable/observable criterion in this AC — generated assertions stay read-side and never invent thresholds"
+                                  title="No measurable/observable criterion in this AC, so generated assertions stay read-side and never invent thresholds"
                                   style={{ background: '#fb718518', color: '#fda4af' }}>
                               not measurable
                             </span>
@@ -1876,9 +1876,9 @@ export default function ArchitecturePage() {
                           }}>
                             {generatingThisAC
                               ? (inflight
-                                  ? `Generating tests for ${inflight.ac_id ?? ac.id} — workflow ${inflight.workflow_id} (${Math.floor(inflight.started_seconds_ago / 60)}m ${inflight.started_seconds_ago % 60}s elapsed)`
-                                  : `Generating tests for ${ac.id} — typically 3-5 min`)
-                              : 'No automation coverage — coverage gap'}
+                                  ? `Generating tests for ${inflight.ac_id ?? ac.id}: workflow ${inflight.workflow_id} (${Math.floor(inflight.started_seconds_ago / 60)}m ${inflight.started_seconds_ago % 60}s elapsed)`
+                                  : `Generating tests for ${ac.id} (typically 3-5 min)`)
+                              : 'No automation coverage (coverage gap)'}
                           </p>
                           <button
                             disabled={generatingThisAC}
@@ -1887,7 +1887,7 @@ export default function ArchitecturePage() {
                               if (generatingACs.has(ac.id)) return  // prevent double-click
                               const forcedSuffix = forceRegen ? ' (forced)' : ''
                               setGeneratingACs(prev => new Set(prev).add(ac.id))
-                              toast.info(`Generating tests for ${ac.id}${forcedSuffix} — this can take 3-5 min for P0 reqs`)
+                              toast.info(`Generating tests for ${ac.id}${forcedSuffix}. This can take 3-5 min for P0 reqs`)
                               try {
                                 // Direct /api/tests/generate call with ac_id + force, replacing
                                 // the old /api/assistant/command dispatcher path which silently

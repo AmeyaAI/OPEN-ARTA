@@ -141,13 +141,13 @@ export default function ATDDSplitView({ requirement, gherkin, scriptContent, tes
 
           {activeTab === 'Newman' && (
             <div className="text-xs p-3 rounded-lg" style={{ background: '#0a0a14', color: '#64748b' }}>
-              Newman collection available — run via Test Explorer
+              Newman collection available (run via Test Explorer)
             </div>
           )}
 
           {activeTab === 'k6' && (
             <div className="text-xs p-3 rounded-lg" style={{ background: '#0a0a14', color: '#64748b' }}>
-              k6 performance script available — run via NFR Assessment
+              k6 performance script available (run via NFR Assessment)
             </div>
           )}
 

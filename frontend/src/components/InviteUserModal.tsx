@@ -5,7 +5,7 @@ import { fetchProjects, inviteUser, type InviteResponse, type Project } from '@/
 import { useToast } from '@/components/ui/Toast'
 
 const PROJECT_ROLES = [
-  { value: '', label: '— No project assignment —' },
+  { value: '', label: 'No project assignment' },
   { value: 'admin', label: 'Admin' },
   { value: 'test_architect', label: 'Test Architect' },
   { value: 'qa_lead', label: 'QA Lead' },
@@ -83,7 +83,7 @@ export default function InviteUserModal({ open, onClose, onInvited }: InviteUser
         project_role: projectRole || null,
       })
       setResult(res)
-      toast.success(res.email_sent ? 'Invite emailed!' : 'Invite created — copy the link')
+      toast.success(res.email_sent ? 'Invite emailed!' : 'Invite created. Copy the link')
       onInvited?.(res)
     } catch (err: any) {
       toast.error(`Invite failed: ${err.message || 'unknown error'}`)
@@ -98,7 +98,7 @@ export default function InviteUserModal({ open, onClose, onInvited }: InviteUser
       setCopiedField(field)
       setTimeout(() => setCopiedField((prev: typeof field | null) => (prev === field ? null : prev)), 2000)
     } catch {
-      toast.error('Could not copy — please select the text manually')
+      toast.error('Could not copy. Please select the text manually')
     }
   }
 
@@ -192,7 +192,7 @@ export default function InviteUserModal({ open, onClose, onInvited }: InviteUser
                   className="w-full px-3 py-2 rounded-lg text-sm"
                   style={{ background: '#0a0a14', border: '1px solid #1e1e3a', color: '#e2e8f0' }}
                 >
-                  <option value="">— No project —</option>
+                  <option value="">No project</option>
                   {projects.map(p => (
                     <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
@@ -246,7 +246,7 @@ export default function InviteUserModal({ open, onClose, onInvited }: InviteUser
               {result.email_sent ? (
                 <>An invite email was sent to <strong>{result.email}</strong>. They have <strong>72 hours</strong> to accept.</>
               ) : (
-                <>SMTP is not configured — copy this link and share it with <strong>{result.email}</strong> directly. Expires in <strong>72 hours</strong>.</>
+                <>SMTP is not configured. Copy this link and share it with <strong>{result.email}</strong> directly. Expires in <strong>72 hours</strong>.</>
               )}
             </div>
 

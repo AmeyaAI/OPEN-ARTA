@@ -290,7 +290,7 @@ export default function NFRAssessmentPage() {
             setScanning(false)
             setNeedsExecution(true)
             failTask(taskId, nfr.error || 'Test execution failed')
-            showToast(nfr.error || 'Test execution failed — check if the target application is running')
+            showToast(nfr.error || 'Test execution failed. Check if the target application is running')
             return
           }
 
@@ -340,7 +340,7 @@ export default function NFRAssessmentPage() {
           } catch { /* silent */ }
         }
       } else if (detail && detail.error === 'auth_state_missing') {
-        message = 'Run Anyway blocked — paste a fresh cookie first.'
+        message = 'Run Anyway blocked. Paste a fresh cookie first.'
         setShowExtraRefreshAuth(true)
       } else if (typeof err?.message === 'string' && err.message) {
         message = `Failed to start test run: ${err.message}`
@@ -472,7 +472,7 @@ export default function NFRAssessmentPage() {
             )}
           </div>
           <p className="text-sm" style={{ color: '#64748b' }}>
-            BMAD TEA Layer 8 — the NFR-gate detail (perf · security · a11y · reliability · compatibility).{' '}
+            BMAD TEA Layer 8: the NFR-gate detail (perf · security · a11y · reliability · compatibility).{' '}
             For the overall SUT-quality verdict see{' '}
             <a href="/sut-quality" style={{ color: '#a5b4fc' }}>SUT Quality →</a>.
           </p>
@@ -506,7 +506,7 @@ export default function NFRAssessmentPage() {
               <span style={{ color: '#fb7185', fontSize: 18 }}>⛔</span>
               <div>
                 <div className="text-sm font-semibold" style={{ color: '#fb7185' }}>
-                  No fresh SUT auth — NFR scan will refuse
+                  No fresh SUT auth: NFR scan will refuse
                 </div>
                 <div className="text-[11px] mt-0.5" style={{ color: '#94a3b8' }}>
                   Discovery cannot authenticate against the SUT, so{' '}
@@ -532,7 +532,7 @@ export default function NFRAssessmentPage() {
             <span className="inline-block w-3 h-3 rounded-full animate-pulse" style={{ background: '#6366f1' }} />
             <div className="flex-1">
               <p className="text-sm font-medium" style={{ color: '#c7d2fe' }}>Test execution in progress...</p>
-              <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Results will appear here when complete. You can navigate away — check the progress bar or notification bell.</p>
+              <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Results will appear here when complete. You can navigate away. Check the progress bar or notification bell.</p>
             </div>
           </div>
         )}

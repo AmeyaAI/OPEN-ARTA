@@ -76,7 +76,7 @@ export async function updateEnvVariables(
     const detail = body.detail
     if (detail && typeof detail === 'object' && detail.rejected) {
       const names = Object.keys(detail.rejected).join(', ')
-      throw new Error(`Rejected: ${names} — values still look like placeholders`)
+      throw new Error(`Rejected: ${names} (values still look like placeholders)`)
     }
     throw new Error(typeof detail === 'string' ? detail : `HTTP ${res.status}`)
   }

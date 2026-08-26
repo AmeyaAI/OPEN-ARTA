@@ -112,7 +112,7 @@ export default function GenerateAllResultsModal({ open, onClose, job, onRetry, o
         {rateLimitActive && (
           <div className="px-6 py-2 text-xs font-medium"
                style={{ background: '#f59e0b15', color: '#f59e0b', borderBottom: '1px solid #f59e0b30' }}>
-            Rate limited — resets at {new Date(job.rate_limit_reset! * 1000).toLocaleTimeString()}
+            Rate limited. Resets at {new Date(job.rate_limit_reset! * 1000).toLocaleTimeString()}
           </div>
         )}
 
@@ -175,7 +175,7 @@ export default function GenerateAllResultsModal({ open, onClose, job, onRetry, o
                     {Object.keys(tools).length === 0 && r.status !== 'skipped' && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded"
                             style={{ background: '#fb718515', color: '#fb7185', border: '1px solid #fb718530' }}>
-                        ⚠ 0 tests{(r as any).coverage_gap_cause ? ` — ${(r as any).coverage_gap_cause}` : ''}
+                        ⚠ 0 tests{(r as any).coverage_gap_cause ? `: ${(r as any).coverage_gap_cause}` : ''}
                       </span>
                     )}
                   </div>

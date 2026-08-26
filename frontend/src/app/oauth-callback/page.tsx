@@ -14,7 +14,7 @@ export default function OAuthCallbackPage() {
     const userB64 = searchParams.get('user')
 
     if (!token || !userB64) {
-      setError('Missing authentication data — please try again.')
+      setError('Missing authentication data. Please try again.')
       return
     }
 

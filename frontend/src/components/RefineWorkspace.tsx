@@ -149,7 +149,7 @@ export default function RefineWorkspace() {
         </span>
       </div>
       <p className="text-sm mb-1" style={{ color: '#64748b' }}>
-        Correct the AI-generated test — ARTA grounds on your fix so future generations improve.
+        Correct the AI-generated test. ARTA grounds on your fix so future generations improve.
       </p>
       <div className="text-xs mb-6" style={{ color: '#94a3b8' }}>
         <span style={{ color: '#a5b4fc', fontFamily: 'monospace' }}>{testId || '—'}</span>
@@ -308,8 +308,8 @@ export default function RefineWorkspace() {
           <div className="text-xs space-y-1" style={{ color: '#cbd5e1' }}>
             <div>Verdict: <b>{applied.verdict}</b>{applied.matched_source ? ` (source: ${applied.matched_source})` : ''}</div>
             {applied.grounding_written
-              ? <div>Durable grounding saved: <span style={{ fontFamily: 'monospace', color: '#a5b4fc' }}>{applied.grounding_fact_ref}</span> — future generations for this SUT will use it.</div>
-              : <div>No new grounding fact (intent-only correction — applied as a regeneration hint).</div>}
+              ? <div>Durable grounding saved: <span style={{ fontFamily: 'monospace', color: '#a5b4fc' }}>{applied.grounding_fact_ref}</span>. Future generations for this SUT will use it.</div>
+              : <div>No new grounding fact (intent-only correction, applied as a regeneration hint).</div>}
             <div>Regeneration: <b>{String((applied.regen as any)?.status ?? 'triggered')}</b></div>
           </div>
           <Link href={`/test-explorer?test_id=${encodeURIComponent(testId)}`}

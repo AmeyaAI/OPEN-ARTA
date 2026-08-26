@@ -108,7 +108,7 @@ export default function SutUnderstandingPanel({ projectId }: { projectId: string
             </span>
             <span className="text-[11px] ml-1" style={{ color: '#94a3b8' }}>known-real</span>
           </span>
-          <span title="Understood from the SUT's OWN source/contract — the aspirational target">
+          <span title="Understood from the SUT's OWN source/contract (the aspirational target)">
             <span className="text-lg font-bold" style={{ color: (cov.source_grounded_pct ?? 0) >= 60 ? '#10b981' : '#fb7185' }}>
               {cov.source_grounded_pct ?? 0}%
             </span>
@@ -156,7 +156,7 @@ export default function SutUnderstandingPanel({ projectId }: { projectId: string
               </span>
             )}
             {(t.workflow_linked_count ?? 0) > 0 && (
-              <span title="Tests linked to a captured business workflow — an ordered API sequence with data dependencies (AC→Workflow spine)">
+              <span title="Tests linked to a captured business workflow: an ordered API sequence with data dependencies (AC→Workflow spine)">
                 {' · '}<span style={{ color: '#a78bfa' }}>⛓ {t.workflow_linked_count} Workflow-linked</span>
               </span>
             )}
@@ -172,7 +172,7 @@ export default function SutUnderstandingPanel({ projectId }: { projectId: string
         <Link href={`/test-explorer?flag=needs_attention&project_id=${encodeURIComponent(projectId)}`}
               className="inline-block px-3 py-1.5 rounded-lg text-xs font-medium"
               style={{ background: 'linear-gradient(135deg,#fb7185,#f97316)', color: '#fff' }}>
-          {needsFixCount} tests need grounding — Refine with AI →
+          {needsFixCount} tests need grounding. Refine with AI →
         </Link>
       )}
 

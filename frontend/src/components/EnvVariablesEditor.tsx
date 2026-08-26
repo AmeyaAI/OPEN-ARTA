@@ -143,7 +143,7 @@ export default function EnvVariablesEditor({ projectId, envName }: Props) {
            }}>
         <div className="text-xs" style={{ color: placeholders.length > 0 ? '#fb923c' : '#34d399' }}>
           {placeholders.length > 0
-            ? <><strong>{placeholders.length}</strong> of {totalCount} variable{totalCount === 1 ? '' : 's'} need{placeholders.length === 1 ? 's' : ''} a value — tests using these will be marked <strong>BLOCKED</strong> until filled.</>
+            ? <><strong>{placeholders.length}</strong> of {totalCount} variable{totalCount === 1 ? '' : 's'} need{placeholders.length === 1 ? 's' : ''} a value. Tests using these will be marked <strong>BLOCKED</strong> until filled.</>
             : <>All {totalCount} declared variable{totalCount === 1 ? '' : 's'} have values for <code>{resolvedEnv}</code>.</>}
         </div>
         {dirtyCount > 0 && (

@@ -80,8 +80,8 @@ export default function AuthStalenessBadge() {
   // guard above suppresses bearer/api_key SUTs), so the cookie wording is now
   // always accurate.
   const headline = isExpired
-    ? 'Auth cookie EXPIRED — pipelines that depend on auth will BLOCK'
-    : `Auth cookie expires ${hours !== null ? `in ~${hours}h` : 'soon'} — refresh before the autonomous loop breaks`
+    ? 'Auth cookie EXPIRED. Pipelines that depend on auth will BLOCK'
+    : `Auth cookie expires ${hours !== null ? `in ~${hours}h` : 'soon'}. Refresh before the autonomous loop breaks`
 
   return (
     <>

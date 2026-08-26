@@ -3,7 +3,7 @@ import './globals.css'
 import AppShell from '@/components/AppShell'
 
 export const metadata: Metadata = {
-  title: 'ARTA — AI Requirements & Test Architect',
+  title: 'ARTA: AI Requirements & Test Architect',
   description: 'Autonomous ATDD platform powered by BMAD TEA methodology',
 }
 

@@ -302,7 +302,7 @@ export default function SutQualityPage() {
                  style={{ background: 'rgba(15,23,42,0.4)', border: '1px solid rgba(251,113,133,0.3)' }}>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: '#fb7185' }}>
-              Worst 10 — Priority Fix Targets
+              Worst 10: Priority Fix Targets
             </h2>
             <span className="text-[11px]" style={{ color: '#64748b' }}>
               Sorted by pass_pct ascending

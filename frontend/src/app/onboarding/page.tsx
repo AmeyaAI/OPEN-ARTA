@@ -845,7 +845,7 @@ export default function OnboardingPage() {
       package_manager: 'npm',
     })
     setField('confirmedTools', ['Playwright', 'Newman', 'k6'])
-    toast.success('Repository connected — stack detected!')
+    toast.success('Repository connected. Stack detected!')
     setLoading(false)
   }
 
@@ -2514,7 +2514,7 @@ export default function OnboardingPage() {
             {state.cicdProvider && (
               <div className="text-center">
                 <span className="text-[10px] px-3 py-1 rounded-full" style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }}>
-                  CI/CD pipeline committed — tests will run on every push
+                  CI/CD pipeline committed. Tests will run on every push
                 </span>
               </div>
             )}
