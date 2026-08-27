@@ -14,6 +14,12 @@ export default function LoginPage() {
   const { login } = useAuth()
   const router = useRouter()
 
+  // SEC: the demo-credentials panel is fail-closed — it renders ONLY when
+  // explicitly enabled via NEXT_PUBLIC_ARTA_DEMO_MODE=1 (local demos, alongside
+  // the backend ARTA_DEMO_MODE). It never shows on a normal deployment, so real
+  // hosts never advertise demo access.
+  const demoLoginEnabled = process.env.NEXT_PUBLIC_ARTA_DEMO_MODE === '1'
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
@@ -93,7 +99,8 @@ export default function LoginPage() {
             {loading ? 'Signing in\u2026' : 'Sign In'}
           </button>
 
-          {/* Demo credentials - collapsible */}
+          {/* Demo credentials - collapsible, fail-closed (see demoLoginEnabled) */}
+          {demoLoginEnabled && (
           <div className="pt-1">
             <button type="button"
                     onClick={() => setShowDemo(!showDemo)}
@@ -117,6 +124,7 @@ export default function LoginPage() {
               </div>
             )}
           </div>
+          )}
 
           {/* OAuth Divider */}
           <div className="flex items-center gap-3 pt-1">
