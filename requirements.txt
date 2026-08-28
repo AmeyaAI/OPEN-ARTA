@@ -33,7 +33,7 @@ email-validator>=2.3.0        # Required by Pydantic EmailStr (src/models/user.p
 alembic>=1.19.1
 
 # Authentication / JWT
-python-jose[cryptography]>=3.3.0   # JWT signing + verification
+python-jose[cryptography]>=3.5.0   # JWT signing + verification
 passlib[bcrypt]>=1.7.4             # Password hashing
 authlib>=1.7.2                     # OAuth Provider Integration
 
