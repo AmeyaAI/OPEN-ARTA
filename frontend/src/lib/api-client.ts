@@ -76,6 +76,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return res.json()
 }
 
+// Exported for pages that build ad-hoc URLs (run-history / suite-report) so they
+// share the same auth contract: Bearer + X-API-Key, and a 401 (e.g. the 60-min
+// JWT expiring mid-session) clears the token and bounces to /login instead of
+// the caller rendering the `{detail: "Invalid or expired token"}` body as data.
+export { request as apiRequest }
+
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
 export interface UserPublic {
@@ -1465,10 +1471,20 @@ export interface GenerateAllJob {
   rate_limit_reset?: number
   results: {
     requirement_id: string
-    status: 'completed' | 'skipped'
+    // Widened: the backend also emits 'not_automatable' (testability gate),
+    // 'gen_failed' (0-test hard failure, e.g. TimeoutError) and
+    // 'completed_no_tests' (benign 0-test gap). Kept optional-friendly so older
+    // job records still typecheck.
+    status: 'completed' | 'skipped' | 'not_automatable' | 'gen_failed' | 'completed_no_tests'
     test_count: number
     tests_retained?: number
     tools: Record<string, ToolDetail>
+    skip_reason?: string
+    not_automatable_reason?: string
+    not_automatable_detail?: string
+    coverage_gap?: boolean
+    coverage_gap_cause?: string
+    gen_failed?: boolean
   }[]
   errors: {
     requirement_id: string
@@ -1566,6 +1582,33 @@ export async function getGenerationHistory(projectId: string) {
 
 export async function getLastCompletedJob(projectId: string) {
   return request<GenerateAllJob>(`/api/tests/generate-all/last?project_id=${projectId}`)
+}
+
+// Project-level generation DISPOSITION summary — the persistent surface that
+// shows automated / not_automatable / gen_failed / needs_attention / pending for
+// the whole project, unioned across every generate-all band (visible even for
+// API/orchestrator-driven runs, not just UI-launched jobs).
+export interface GenerationCoverage {
+  project_id: string
+  total: number
+  buckets: {
+    automated: number
+    not_automatable: number
+    gen_failed: number
+    needs_attention: number
+    pending: number
+  }
+  complete: boolean
+  sum_check: number
+  samples: Record<string, { req_id: string; reason: string }[]>
+  // compact per-requirement disposition: slug -> bucket key (automated /
+  // not_automatable / gen_failed / needs_attention / pending)
+  by_requirement: Record<string, string>
+  latest_job_id: string | null
+}
+
+export async function getGenerationCoverage(projectId: string) {
+  return request<GenerationCoverage>(`/api/tests/generate-all/coverage?project_id=${projectId}`)
 }
 
 export async function retryFailedTests(jobId: string, fromRequirement?: string) {

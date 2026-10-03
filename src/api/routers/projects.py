@@ -2556,6 +2556,18 @@ def _to_iso(ts: float | int | None) -> str | None:
     return datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat(timespec="seconds")
 
 
+def _credential_login_available(auth: dict) -> bool:
+    """True when the environment can auto-login server-side from STORED
+    credentials (username/password) via a configured `login_capture` capture
+    script — i.e. the RefreshAuthModal can offer one-click auto-login instead
+    of manual token paste. Requires username + password + a login_capture
+    descriptor naming the capture script. Config-driven (descriptor lives in
+    projects.json), so this stays generic in src/ (directive #6)."""
+    creds = (auth or {}).get("credentials") or {}
+    lc = creds.get("login_capture") or {}
+    return bool(creds.get("username") and creds.get("password") and lc.get("script"))
+
+
 def _r98_1_sync_env_block_from_jwt(
     env_block_vars: dict, jwt_payload: dict,
 ) -> dict[str, str]:
@@ -2674,6 +2686,9 @@ async def get_auth_state(
     auth = (env_block or {}).get("auth") or {}
     cookie_name = ((auth.get("credentials") or {}).get("cookie_name")) or None
     base_url = (env_block or {}).get("base_url")
+    # Credential auto-login availability — surfaced so the RefreshAuthModal can
+    # offer a one-click "log in with stored credentials" instead of manual paste
+    _cred_avail = _credential_login_available(auth)
 
     # R28.0c — invert precedence: storage state takes priority over
     # projects.json placeholder. R15 paste writes ONLY to storage
@@ -2692,6 +2707,7 @@ async def get_auth_state(
     if sc and sc.get("value"):
         payload = ar._decode_jwt_payload(sc["value"])
         return {
+            "credential_login_available": _cred_avail,
             "status": "valid",
             "needs_refresh": False,
             "cookie_name": cookie_name or sc.get("name"),
@@ -2726,6 +2742,7 @@ async def get_auth_state(
     if redacted_field:
         _placeholder_repr = repr(direct_cookie) if redacted_field == "cookie_value" else "<placeholder>"
         return {
+            "credential_login_available": _cred_avail,
             "status": "redacted_placeholder",
             "needs_refresh": True,
             "cookie_name": cookie_name,
@@ -2744,6 +2761,7 @@ async def get_auth_state(
     storage_path = ar._find_storage_state_path(env_name)
     if not storage_path:
         return {
+            "credential_login_available": _cred_avail,
             "status": "missing",
             "needs_refresh": True,
             "cookie_name": cookie_name,
@@ -2756,6 +2774,7 @@ async def get_auth_state(
     storage = ar._read_storage_state(storage_path)
     if not storage:
         return {
+            "credential_login_available": _cred_avail,
             "status": "unreadable",
             "needs_refresh": True,
             "cookie_name": cookie_name,
@@ -2777,6 +2796,7 @@ async def get_auth_state(
 
     if not session_value:
         return {
+            "credential_login_available": _cred_avail,
             "status": "missing_cookie",
             "needs_refresh": True,
             "cookie_name": cookie_name,
@@ -2791,6 +2811,7 @@ async def get_auth_state(
         # Opaque token — can't tell expiry. Trust it; operator returns
         # if tests start cascade-skipping.
         return {
+            "credential_login_available": _cred_avail,
             "status": "opaque",
             "needs_refresh": False,
             "cookie_name": cookie_name,
@@ -2804,6 +2825,7 @@ async def get_auth_state(
     # as "valid" (→ analytics 400). `_is_session_expired` = min(wrapper, inner).
     expired = ar._is_session_expired(session_value)
     return {
+        "credential_login_available": _cred_avail,
         "status": "expired" if expired else "valid",
         "needs_refresh": expired,
         "cookie_name": cookie_name,
@@ -2813,6 +2835,117 @@ async def get_auth_state(
         "expires_at": _to_iso(payload["exp"]),
         "expired_at": _to_iso(payload["exp"]) if expired else None,
     }
+
+
+@router.post(
+    "/{project_id}/auth-state/credential-login",
+    dependencies=[Depends(_require_api_key)],
+)
+async def credential_login(project_id: str, environment: str | None = Query(None)) -> dict:
+    """Server-side SUT auto-login from STORED username/password via the env's
+    configured `login_capture` capture script — the credential-based analogue of
+    the paste flow, for SUTs whose login is a multi-hop BFF/OAuth
+    flow, not a paste-able token. Runs the capture script as an isolated
+    subprocess, then persists the fresh cookie/refresh-token by REUSING
+    `update_auth_state` (single source of truth). RBAC-gated via the router
+    class; credentials are never logged or returned."""
+    import asyncio as _aio
+    import json as _json
+    import shutil as _shutil
+    import tempfile as _tempfile
+    from ...agents import auth_refresher as ar
+
+    project = await _resolve_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+    env_name, env_block = ar._select_env_block(project, environment)
+    auth = (env_block or {}).get("auth") or {}
+    creds = auth.get("credentials") or {}
+    lc = creds.get("login_capture") or {}
+    username, password = creds.get("username"), creds.get("password")
+    cookie_name = creds.get("cookie_name")
+    base_url = (env_block or {}).get("base_url")
+    if not (username and password and lc.get("script")):
+        raise HTTPException(
+            status_code=400,
+            detail=(f"Credential auto-login not configured for env {env_name!r} — "
+                    "needs auth.credentials.username, password, and login_capture.script."),
+        )
+
+    # Harden the script path: realpath must stay under src/automation/, .js only.
+    _automation_dir = os.path.realpath(os.path.join(os.getcwd(), "src", "automation"))
+    _script = os.path.realpath(os.path.join(_automation_dir, str(lc["script"])))
+    if not (_script == _automation_dir or _script.startswith(_automation_dir + os.sep)) \
+            or not _script.endswith(".js") or not os.path.isfile(_script):
+        raise HTTPException(status_code=400,
+                            detail="login_capture.script must be a .js file under src/automation/.")
+
+    # Per-request isolated output dir (no shared /tmp race with concurrent
+    # logins or the batch driver). Fill the descriptor env_map from stored creds.
+    _outdir = _tempfile.mkdtemp(prefix="arta_cred_login_")
+    _subst = {"base_url": base_url or "", "username": username, "password": password}
+    _env = dict(os.environ)
+    _env.update({"NODE_PATH": "/usr/lib/node_modules",
+                 "PLAYWRIGHT_BROWSERS_PATH": "/opt/pw-browsers", "K0_OUT": _outdir})
+    for _k, _tmpl in (lc.get("env_map") or {}).items():
+        _v = str(_tmpl)
+        for _n, _val in _subst.items():
+            _v = _v.replace("${%s}" % _n, str(_val))
+        _env[str(_k)] = _v
+
+    def _scrub(s: str) -> str:
+        for _sec in (password, username):
+            if _sec:
+                s = s.replace(_sec, "***")
+        return s
+
+    try:
+        proc = await _aio.create_subprocess_exec(
+            "node", _script, env=_env, cwd=os.getcwd(),
+            stdout=_aio.subprocess.PIPE, stderr=_aio.subprocess.STDOUT)
+        try:
+            _out, _ = await _aio.wait_for(proc.communicate(), timeout=180)
+        except _aio.TimeoutError:
+            proc.kill()
+            raise HTTPException(status_code=504,
+                                detail="Credential login timed out (SUT slow or unreachable).")
+        _state_file = os.path.join(_outdir, "storage_state.json")
+        if proc.returncode != 0 or not os.path.isfile(_state_file):
+            _tail = _scrub((_out or b"").decode("utf-8", "replace"))[-500:]
+            raise HTTPException(status_code=502,
+                                detail=f"Credential login failed (exit {proc.returncode}). Capture tail: {_tail}")
+        _state = _json.load(open(_state_file))
+    finally:
+        _shutil.rmtree(_outdir, ignore_errors=True)
+
+    # Extract the session cookie + refresh-token from captured storage state.
+    _cookies = _state.get("cookies") or []
+    _cval = next((c.get("value") for c in _cookies if c.get("name") == cookie_name), None) \
+        or next((c.get("value") for c in _cookies if len(str(c.get("value") or "")) > 20), None)
+    if not _cval:
+        raise HTTPException(status_code=502, detail=f"Capture produced no '{cookie_name}' cookie.")
+    _rtok = None
+    for _o in _state.get("origins") or []:
+        for _e in _o.get("localStorage") or []:
+            if _e.get("name") == "refresh-token" and _e.get("value"):
+                _rtok = str(_e["value"]).strip('"')
+                break
+        if _rtok:
+            break
+
+    # serve /api/v1/users/me). This writes .arta/environments/<env>-storage.json.
+    body = AuthStateUpdate(
+        environment=env_name, cookie_value=_cval,
+        refresh_token=(_rtok if _rtok and len(_rtok) >= 10 else None),
+        cookie_name=cookie_name, skip_live_probe=True,
+    )
+    result = await update_auth_state(project_id, body)
+    log.info("credential_login: env=%s minted fresh SUT auth (refresh_token=%s)",
+             env_name, bool(_rtok))
+    if isinstance(result, dict):
+        result["source"] = "credential_login"
+        result["refresh_token_present"] = bool(_rtok)
+    return result
 
 
 @router.post(

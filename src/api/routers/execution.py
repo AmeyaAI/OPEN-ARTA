@@ -6642,7 +6642,20 @@ async def _run_playwright(
 
         if not non_a11y_specs:
             # R214 — truthful SKIP instead of silent return, so playwright never
-            # vanishes from a run that scheduled it (reconciliation also covers it).
+            # vanishes from a run that scheduled it. BUT when the run also scheduled
+            # another tool (e.g. Newman), a req with no Playwright spec is simply
+            # newman-only-by-design (R300.C sends backend/API reqs to Newman) — the
+            # phantom "no specs matched" row is pure noise (276 such rows on the
+            # truthful row only when Playwright was the SOLE scheduled tool.
+            # Killswitch ARTA_NO_SPECS_SKIP_SUPPRESS_DISABLE=1.
+            _exp = (_REAL_RUNS.get(run_id, {}) or {}).get("expected_tools", {}) or {}
+            _other = {t for t in _exp if str(t).lower() != "playwright"}
+            _suppress = _other and os.environ.get(
+                "ARTA_NO_SPECS_SKIP_SUPPRESS_DISABLE", "").lower() not in ("1", "true")
+            if _suppress:
+                log.info("R214: playwright no specs for run %s but %s also scheduled — "
+                         "suppressing phantom no_specs_matched skip", run_id, sorted(_other))
+                return
             log.info("R214: playwright scheduled but no non-a11y specs in %s — nothing to run",
                      scripts_dir)
             _REAL_RESULTS.setdefault(run_id, []).append({
@@ -9660,6 +9673,35 @@ async def _run_newman(
                         f"R55.1 grounding_violation: {len(_violations)} violation(s) "
                         f"detected at gen time after retries — spec not dispatched."
                     )
+                # A gen-REFUSED collection (R67.A: `_arta_meta.gen_refused`, e.g.
+                # openapi_cache_empty) has ZERO items — the per-item loop below
+                # emitted nothing, so the requirement vanished from the run
+                # (only R214's per-run "dispatch_produced_no_results" stub
+                # Emit ONE truthful BLOCKED row per refused collection instead.
+                if not _items and os.environ.get("ARTA_R55_1_REFUSED_ROW_DISABLE") != "1":
+                    _meta_r = _info.get("_arta_meta") or {}
+                    _refusal = (
+                        str(_meta_r.get("gen_refusal_reason") or "")
+                        if _meta_r.get("gen_refused") else ""
+                    )
+                    _reason_r = f"gen_refused_{_refusal}" if _refusal else _block_kind
+                    _REAL_RESULTS[run_id].append({
+                        "status": "BLOCKED",
+                        "title": f"{collection_name} :: <no requests — generation refused>",
+                        "duration_ms": 0,
+                        "automation_tool": "newman",
+                        "test_id": f"{collection_name}-gen-refused",
+                        "error_message": (
+                            f"Newman collection has 0 requests: generation was refused at gen "
+                            f"time ({_refusal or _block_kind}). Nothing to execute. "
+                            f"Hint: {_hint[:200]}"
+                        ),
+                        "metadata": {
+                            "blocked_reason": _reason_r,
+                            "gen_refused": bool(_meta_r.get("gen_refused")),
+                            "grounding_violations": _violations[:10],
+                        },
+                    })
                 for _item in _items:
                     if not isinstance(_item, dict):
                         continue
@@ -14332,7 +14374,11 @@ _REPORT_STYLE = """<style>
   .card .k { color:#94a3b8; font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
   .card .v { font-size:24px; font-weight:700; }
   .card .sub { color:#94a3b8; font-size:11px; }
-  .links { margin-bottom:18px; display:flex; gap:8px; flex-wrap:wrap; }
+  .nav { display:flex; gap:10px; align-items:center; margin-bottom:14px; font-size:13px; }
+.nav a { color:#a5b4fc; text-decoration:none; padding:6px 10px; border-radius:6px; border:1px solid #334155; background:#1e293b; }
+.nav a:hover { border-color:#6366f1; }
+.nav a.ghost { color:#94a3b8; background:transparent; }
+.links { margin-bottom:18px; display:flex; gap:8px; flex-wrap:wrap; }
   .links a { display:inline-block; padding:8px 14px; border-radius:6px; text-decoration:none; font-size:13px; border:1px solid #334155; background:#1e293b; color:#e2e8f0; }
   .links a.primary { background:#6366f1; border-color:#6366f1; color:#fff; }
   .toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; position:sticky; top:0; background:#0a0a0f; padding:10px 0; z-index:5; border-bottom:1px solid #1a1a2e; margin-bottom:8px; }
@@ -15123,8 +15169,18 @@ def _render_unified_report(run_id: str, run_data: dict, test_results: list[dict]
         f'<title>ARTA Run Report — {_html.escape(run_id)}</title>'
         + _REPORT_STYLE + '</head><body><div class="wrap">'
     )
+    # Way back: the static report is served under /artifacts on the app origin,
+    # so an app-relative deep link re-opens this run in Run History (the
+    # /runs/{id} fetch-by-id fallback accepts the text run_id).
+    nav_html = (
+        '<div class="nav">'
+        f'<a href="/run-history?run_id={_html.escape(run_id)}">← Back to ARTA · Run History</a>'
+        '<a href="javascript:history.back()" class="ghost">← Previous page</a>'
+        '</div>'
+    )
     header = (
-        '<h1>ARTA Run Report</h1>'
+        nav_html
+        + '<h1>ARTA Run Report</h1>'
         f'<div class="meta"><code>{_html.escape(run_id)}</code> · {_html.escape(env)} · '
         f'{_html.escape(started)} → {_html.escape(finished)}</div>'
         '<div class="cards">'
@@ -15675,11 +15731,34 @@ def _parse_playwright_json(
                         # framework_limit_or_implicit hiding the cascade
                         # behind a MAX_AUTO_TESTS-shaped label.
                         _r123_d_metadata["skip_reason"] = "spec_cascade_from_prior_fail"
+                    elif os.environ.get("ARTA_R123_D_CAPABILITY_LABELS_DISABLE", "").lower() not in ("1", "true") and (
+                        "infrastructure gap" in _err_lower
+                        or "container inspection" in _err_lower
+                        or "container package" in _err_lower
+                        or "dpkg" in _err_lower
+                    ):
+                        # The ATDD-generated test self-skipped because the AC needs
+                        # SUT capabilities the API/UI surface doesn't expose (container
+                        # package inspection, image metadata). This is a truthful
+                        # SUT-capability gap — NOT a framework limit. Label it honestly.
+                        _r123_d_metadata["skip_reason"] = "no_sut_capability"
+                    elif os.environ.get("ARTA_R123_D_CAPABILITY_LABELS_DISABLE", "").lower() not in ("1", "true") and (
+                        "external tool dependency" in _err_lower
+                        or "sast" in _err_lower
+                        or "aikido" in _err_lower
+                        or "trivy" in _err_lower
+                        or "grype" in _err_lower
+                        or ("scanner" in _err_lower and "integration" in _err_lower)
+                    ):
+                        # AC requires an external tool (SAST/CVE scanner) not part of
+                        # the SUT — a truthful external-dependency gap, not gen-quality.
+                        _r123_d_metadata["skip_reason"] = "external_tool_dependency"
                     else:
-                        # Default — covers framework limits (MAX_AUTO_TESTS),
-                        # genuine MAX_FAILURES caps, and other implicit
-                        # SKIPs. Still operator-actionable: shows the SKIP
-                        # is NOT a gen-quality issue.
+                        # Default — genuine framework limits (MAX_AUTO_TESTS /
+                        # MAX_FAILURES caps) and message-less implicit SKIPs whose
+                        # cause the JSON doesn't carry. (Capability/external-tool
+                        # self-skips are caught above — this default no longer hides
+                        # those, so it no longer implies "not a gen-quality issue".)
                         _r123_d_metadata["skip_reason"] = "framework_limit_or_implicit"
 
                 # R228 — stamp spec→requirement PROVENANCE onto EVERY row so runs
@@ -15802,11 +15881,16 @@ async def runs_summary(limit: int = 10, project_id: str | None = None):
                 # set by _normalize_run) so the dashboard trend + avg agree with
                 # run-history detail + the summary report. Recomputing over
                 # `total` here would reintroduce the total-vs-executed split.
-                avg_pass_rate = sum(
-                    (r.get("pass_rate") or 0)
-                    for r in runs
-                ) / total
-                avg_duration = sum(r.get("duration_s", 0) or 0 for r in runs) / total
+                # pass_rate arrives as a Decimal-serialized STRING ("0.00") from
+                # the DB (_to_dict + json default=str) — coerce to float before
+                # summing, else `sum()` raises TypeError → 500 → "undefined" tiles.
+                def _num(v):
+                    try:
+                        return float(v)
+                    except (TypeError, ValueError):
+                        return 0.0
+                avg_pass_rate = sum(_num(r.get("pass_rate")) for r in runs) / total
+                avg_duration = sum(_num(r.get("duration_s")) for r in runs) / total
             else:
                 avg_pass_rate = avg_duration = 0
             gate_counts = {"PASS": 0, "CONCERNS": 0, "FAIL": 0, "WAIVED": 0}
@@ -15818,7 +15902,7 @@ async def runs_summary(limit: int = 10, project_id: str | None = None):
                 {
                     "run_id": r.get("run_id") or r.get("id"),
                     "started_at": r.get("started_at") or r.get("created_at"),
-                    "pass_rate": round(r.get("pass_rate") or 0, 1),   # R306.A executed-based
+                    "pass_rate": round(_num(r.get("pass_rate")), 1),   # R306.A executed-based (coerced from Decimal-str)
                     "coverage_pct": r.get("coverage_pct", 0),
                     "gate_decision": r.get("gate_decision"),
                 }
@@ -15866,6 +15950,193 @@ async def runs_summary(limit: int = 10, project_id: str | None = None):
         "gate_counts": gate_counts,
         "trend": trend,
     }
+
+
+@router.get("/runs/suite-rollup", dependencies=[Depends(_require_api_key)])
+async def suite_rollup(
+    project_id: str,
+    environment: str | None = None,
+    build_id: str | None = None,
+    since: str | None = None,
+):
+    """Consolidated 'suite run' view. A full-suite execution is fragmented into many
+    small batch-runs (for the 15-min auth window), so no single test_runs row shows
+    the whole result. This SUMs PASS/FAIL/BLOCKED/SKIP from execution_results across
+    the run set, plus the blocked/skip reason breakdown. Run set chosen by, in order:
+    build_id (clean key — future suite runs share one) → since-window → project+env+
+    latest date (coarse retroactive fallback; may conflate same-day suite runs)."""
+    from ...db.session import async_session_factory
+
+    params: dict = {"pid": project_id, "env": environment, "bid": build_id, "since": since}
+    async with async_session_factory() as db:
+        if build_id:
+            where = "tr.project_id::text=:pid AND tr.build_id=:bid"
+            keyed_by = f"build:{build_id}"
+        elif since:
+            where = "tr.project_id::text=:pid AND er.executed_at>=:since" + (
+                " AND tr.environment=:env" if environment else "")
+            keyed_by = f"since:{since}"
+        else:
+            _envclause = " AND tr.environment=:env" if environment else ""
+            _d = (await db.execute(text(
+                "SELECT max(er.executed_at::date) FROM execution_results er "
+                "JOIN test_runs tr ON tr.id=er.run_id WHERE tr.project_id::text=:pid" + _envclause,
+            ), params)).scalar()
+            params["d"] = _d
+            where = "tr.project_id::text=:pid AND er.executed_at::date=:d" + _envclause
+            keyed_by = f"date:{_d}"
+
+        base = f"FROM execution_results er JOIN test_runs tr ON tr.id=er.run_id WHERE {where}"
+        _status = (await db.execute(text(
+            f"SELECT er.status, count(*) {base} GROUP BY er.status"), params)).fetchall()
+        _meta = (await db.execute(text(
+            "SELECT er.metadata->>'blocked_reason', er.metadata->>'skip_reason', er.status, count(*) "
+            f"{base} GROUP BY 1,2,3"), params)).fetchall()
+        _agg = (await db.execute(text(
+            "SELECT count(distinct er.run_id), min(er.executed_at), max(er.executed_at), "
+            f"string_agg(distinct tr.environment, '/') {base}"),
+            params)).fetchone()
+
+    counts = {str(s).upper(): int(c) for s, c in _status}
+    P, F, B, S = (counts.get(k, 0) for k in ("PASS", "FAIL", "BLOCKED", "SKIP"))
+    reason_breakdown: dict = {"blocked": {}, "skip": {}}
+    for br, sr, st, c in _meta:
+        st = str(st).upper()
+        if st == "BLOCKED" and br:
+            reason_breakdown["blocked"][br] = reason_breakdown["blocked"].get(br, 0) + int(c)
+        elif st == "SKIP" and sr:
+            reason_breakdown["skip"][sr] = reason_breakdown["skip"].get(sr, 0) + int(c)
+    return {
+        "keyed_by": keyed_by,
+        "run_count": int(_agg[0]) if _agg and _agg[0] else 0,
+        "passed": P, "failed": F, "blocked": B, "skipped": S, "total": P + F + B + S,
+        "pass_of_executed": round(100 * P / (P + F)) if (P + F) else 0,
+        "started_at": str(_agg[1]) if _agg and _agg[1] else None,
+        "completed_at": str(_agg[2]) if _agg and _agg[2] else None,
+        "environment": (_agg[3] if _agg and len(_agg) > 3 and _agg[3] else (environment or "—")),
+        "reason_breakdown": reason_breakdown,
+    }
+
+
+@router.get("/runs/suite-detail", dependencies=[Depends(_require_api_key)])
+async def suite_detail(
+    project_id: str,
+    environment: str | None = None,
+    build_id: str | None = None,
+    since: str | None = None,
+):
+    """RunDetail-shaped drill-down for a consolidated suite run: the per-test
+    result rows aggregated across the suite's batch runs, so the existing
+    run-detail panel can render them. Same run-set selection as /runs/suite-rollup.
+    Results are un-truncated (up to a 5000 safety cap) so the panel's computed
+    PASS/FAIL counts equal the true totals; ordered FAIL→BLOCKED→SKIP→PASS."""
+    from ...db.session import async_session_factory
+
+    params: dict = {"pid": project_id, "env": environment, "bid": build_id, "since": since}
+    async with async_session_factory() as db:
+        if build_id:
+            where = "tr.project_id::text=:pid AND tr.build_id=:bid"
+            keyed_by = f"build:{build_id}"
+        elif since:
+            where = "tr.project_id::text=:pid AND er.executed_at>=:since" + (
+                " AND tr.environment=:env" if environment else "")
+            keyed_by = f"since:{since}"
+        else:
+            _envclause = " AND tr.environment=:env" if environment else ""
+            _d = (await db.execute(text(
+                "SELECT max(er.executed_at::date) FROM execution_results er "
+                "JOIN test_runs tr ON tr.id=er.run_id WHERE tr.project_id::text=:pid" + _envclause,
+            ), params)).scalar()
+            params["d"] = _d
+            where = "tr.project_id::text=:pid AND er.executed_at::date=:d" + _envclause
+            keyed_by = f"date:{_d}"
+
+        base = f"FROM execution_results er JOIN test_runs tr ON tr.id=er.run_id WHERE {where}"
+        _status = (await db.execute(text(
+            f"SELECT er.status, count(*) {base} GROUP BY er.status"), params)).fetchall()
+        _agg = (await db.execute(text(
+            f"SELECT count(distinct er.run_id), min(er.executed_at), max(er.executed_at) {base}"),
+            params)).fetchone()
+        _rows = (await db.execute(text(
+            "SELECT er.test_id, er.title, er.status, er.automation_tool, er.error_message, "
+            "er.metadata->>'blocked_reason' AS br, er.metadata->>'skip_reason' AS sr, er.duration_ms "
+            f"{base} ORDER BY CASE upper(er.status::text) WHEN 'FAIL' THEN 0 WHEN 'BLOCKED' THEN 1 "
+            "WHEN 'SKIP' THEN 2 WHEN 'PASS' THEN 3 ELSE 4 END LIMIT 5001"), params)).fetchall()
+
+    counts = {str(s).upper(): int(c) for s, c in _status}
+    P, F, B, S = (counts.get(k, 0) for k in ("PASS", "FAIL", "BLOCKED", "SKIP"))
+    truncated = len(_rows) > 5000
+    results = [{
+        "test_id": r[0] or "",
+        "title": r[1] or "",
+        "status": str(r[2]).upper(),
+        "automation_tool": r[3] or "",
+        "tool": r[3] or "",
+        "error_message": r[4],
+        "metadata": {"blocked_reason": r[5], "skip_reason": r[6]},
+        "duration_ms": int(r[7] or 0),
+    } for r in _rows[:5000]]
+    return {
+        "id": f"suite-{keyed_by}", "run_id": f"suite-{keyed_by}", "status": "completed",
+        "environment": environment, "project_id": project_id, "keyed_by": keyed_by,
+        "run_count": int(_agg[0]) if _agg and _agg[0] else 0,
+        "passed": P, "failed": F, "skipped": S, "blocked": B, "total": P + F + B + S,
+        "pass_rate": round(100 * P / (P + F)) if (P + F) else 0,
+        "coverage_pct": 0, "duration_s": 0,
+        "gate_decision": "FAIL" if F else "PASS",
+        "started_at": str(_agg[1]) if _agg and _agg[1] else None,
+        "finished_at": str(_agg[2]) if _agg and _agg[2] else None,
+        # In-app suite report page — makes the detail panel's "Open Full Report"
+        # button render for the aggregate (it gates on report_url), linking to the
+        # per-run breakdown + drill-down. Carries the same run-set keying params.
+        "report_url": (
+            f"/suite-report?project_id={project_id}"
+            + (f"&build_id={build_id}" if build_id else (f"&since={since}" if since else ""))
+            + (f"&environment={environment}" if environment else "")
+        ),
+        "results": results, "results_truncated": truncated,
+    }
+
+
+@router.get("/runs/suite-runs", dependencies=[Depends(_require_api_key)])
+async def suite_runs(
+    project_id: str,
+    environment: str | None = None,
+    build_id: str | None = None,
+    since: str | None = None,
+):
+    """List the individual batch runs that make up a consolidated suite run, so
+    the suite report can link to each run's own detail. Same run-set selection as
+    /runs/suite-rollup (build_id → since → project+env+latest-date)."""
+    from ...db.session import async_session_factory
+
+    params: dict = {"pid": project_id, "env": environment, "bid": build_id, "since": since}
+    async with async_session_factory() as db:
+        if build_id:
+            where = "project_id::text=:pid AND build_id=:bid"
+            keyed_by = f"build:{build_id}"
+        elif since:
+            where = "project_id::text=:pid AND started_at>=:since" + (
+                " AND environment=:env" if environment else "")
+            keyed_by = f"since:{since}"
+        else:
+            _envclause = " AND environment=:env" if environment else ""
+            _d = (await db.execute(text(
+                "SELECT max(started_at::date) FROM test_runs WHERE project_id::text=:pid" + _envclause,
+            ), params)).scalar()
+            params["d"] = _d
+            where = "project_id::text=:pid AND started_at::date=:d" + _envclause
+            keyed_by = f"date:{_d}"
+        rows = (await db.execute(text(
+            "SELECT id, run_id, started_at, passed, failed, skipped, gate_decision, status "
+            f"FROM test_runs WHERE {where} ORDER BY started_at DESC LIMIT 500"), params)).fetchall()
+
+    runs = [{
+        "id": str(r[0]), "run_id": r[1], "started_at": str(r[2]) if r[2] else None,
+        "passed": int(r[3] or 0), "failed": int(r[4] or 0), "skipped": int(r[5] or 0),
+        "gate_decision": str(r[6]) if r[6] else None, "status": str(r[7]) if r[7] else None,
+    } for r in rows]
+    return {"keyed_by": keyed_by, "count": len(runs), "runs": runs}
 
 
 @router.get("/runs/active", dependencies=[Depends(_require_api_key)])

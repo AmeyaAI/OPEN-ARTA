@@ -182,9 +182,13 @@ export default function RunDetailContent({ selected, isLive }: { selected: any; 
   }
 
   const results = (selected.results || []) as any[]
-  const total = results.length
-  const passedCount = results.filter(t => t.status === 'PASS').length
-  const failedCount = results.filter(t => t.status === 'FAIL').length
+  // Prefer the backend's true totals when present (a consolidated suite run caps
+  // the rendered rows for performance, so counting the capped `results` would
+  // understate the totals). Normal single runs carry the same values, so this is
+  // a no-op for them.
+  const total = (typeof selected.total === 'number' ? selected.total : results.length)
+  const passedCount = (typeof selected.passed === 'number' ? selected.passed : results.filter(t => t.status === 'PASS').length)
+  const failedCount = (typeof selected.failed === 'number' ? selected.failed : results.filter(t => t.status === 'FAIL').length)
   // WS2 — prefer the backend pass_rate (consistent with dashboard /api/dashboard.pass_rate
   // + run-history summary avg_pass_rate); fall back to a client recompute only when absent.
   // R306.A — the fallback is OVER EXECUTED tests (passed + failed), matching the
@@ -1283,7 +1287,11 @@ export default function RunDetailContent({ selected, isLive }: { selected: any; 
       {/* View Report + Artifacts */}
       {selected.report_url && (
         <div className="mb-4 flex gap-2">
-          <a href={selected.report_url} target="_blank" rel="noopener noreferrer"
+          <a href={selected.report_url}
+             // In-app suite report stays in this tab (Back works); static artifact
+             // reports (/artifacts/…/summary.html) open beside ARTA in a new tab.
+             target={String(selected.report_url).startsWith('/suite-report') ? '_self' : '_blank'}
+             rel="noopener noreferrer"
              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition hover:opacity-90"
              style={{ background: '#6366f1', color: '#fff' }}>
             ↗ Open Full Report

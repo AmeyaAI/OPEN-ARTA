@@ -22,10 +22,12 @@ import {
   fetchInFlightGenerations,
   bulkAddEnvironmentVariables,
   computeToolInventoryGaps,
+  getGenerationCoverage,
   type Requirement,
   type RequirementChange,
   type TestCase,
   type GenerateAllJob,
+  type GenerationCoverage,
   type InFlightGeneration,
   type ExpectedTool,
 } from '@/lib/api-client'
@@ -35,6 +37,7 @@ import ATDDSplitView from '@/components/ATDDSplitView'
 import { useProject } from '@/lib/project-context'
 import { useTasks } from '@/lib/task-context'
 import GenerateAllResultsModal from '@/components/GenerateAllResultsModal'
+import GenerationCoveragePanel, { DISPOSITION_META, DISPOSITION_ORDER, type ActiveJobProgress } from '@/components/GenerationCoveragePanel'
 import RegenerateByToolModal from '@/components/RegenerateByToolModal'
 import ExecuteByToolModal from '@/components/ExecuteByToolModal'
 
@@ -130,7 +133,16 @@ export default function ArchitecturePage() {
   const [selectedReqId, setSelectedReqId] = useState<string | null>(null)
   const [sourceFilter, setSourceFilter] = useState<string>('all')
   const [bandFilter, setBandFilter] = useState<string>('all')
+  // Generation-status + priority filters (status keys off genCoverage.by_requirement).
+  const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [priorityFilter, setPriorityFilter] = useState<string>('all')
+  // Live progress of the running generation band (for the coverage panel line).
+  const [activeJobProgress, setActiveJobProgress] = useState<ActiveJobProgress | null>(null)
   const [reqTests, setReqTests] = useState<TestCase[]>([])
+  // Per-requirement generation disposition (shared with GenerationCoveragePanel).
+  // NB: named genCoverage (not `coverage`) to avoid shadowing the per-card
+  // `const coverage = getCoverage(...)` number inside filteredReqs.map.
+  const [genCoverage, setGenCoverage] = useState<GenerationCoverage | null>(null)
   const [changeLog, setChangeLog] = useState<RequirementChange[]>([])
   const [changeLogOpen, setChangeLogOpen] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -163,12 +175,38 @@ export default function ArchitecturePage() {
       try {
         const job = await getActiveGenerateJob(currentProjectId)
         if (stopped) return
-        setBulkActive(!!(job && job.status === 'running'))
+        const running = !!(job && job.status === 'running')
+        setBulkActive(running)
+        setActiveJobProgress(running ? {
+          completed: job.completed ?? 0,
+          total: job.total_requirements ?? 0,
+          tests: job.total_tests_generated ?? 0,
+        } : null)
       } catch { /* ignore — keep last known state */ }
     }
     tick()
     const id = setInterval(tick, 5000)
     return () => { stopped = true; clearInterval(id) }
+  }, [currentProjectId])
+
+  // Per-requirement generation disposition — one fetch shared by the coverage
+  // panel AND the per-card status chips. Re-render guard: the requirements list
+  // renders ~2k cards, so only setState when the disposition picture actually
+  // changed (cheap bucket-signature compare), not on every 30s poll.
+  const _covSigRef = useRef<string>('')
+  useEffect(() => {
+    if (!currentProjectId) return
+    let alive = true
+    const loadCov = async () => {
+      try {
+        const c = await getGenerationCoverage(currentProjectId)
+        const sig = JSON.stringify(c.buckets)
+        if (alive && sig !== _covSigRef.current) { _covSigRef.current = sig; setGenCoverage(c) }
+      } catch { /* non-fatal — keep last known coverage */ }
+    }
+    loadCov()
+    const id = setInterval(loadCov, 30000)
+    return () => { alive = false; clearInterval(id) }
   }, [currentProjectId])
 
   // Poll server-side in-flight registry every 5s. Stops polling once nothing
@@ -539,6 +577,14 @@ export default function ArchitecturePage() {
     if (bandFilter !== 'all') {
       list = list.filter(r => getQuality(r)?.band === bandFilter)
     }
+    if (priorityFilter !== 'all') {
+      list = list.filter(r => r.priority === priorityFilter)
+    }
+    // Generation-status filter — only applies once coverage is loaded, else a
+    // non-'all' selection would blank the list (by_requirement undefined for all).
+    if (statusFilter !== 'all' && genCoverage) {
+      list = list.filter(r => genCoverage.by_requirement?.[getReqId(r)] === statusFilter)
+    }
     // Sort: priority (P0 first), then coverage ascending
     const prioOrder: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 }
     return [...list].sort((a, b) => {
@@ -547,7 +593,7 @@ export default function ArchitecturePage() {
       if (pa !== pb) return pa - pb
       return getCoverage(a, reqTests) - getCoverage(b, reqTests)
     })
-  }, [requirements, sourceFilter, bandFilter])
+  }, [requirements, sourceFilter, bandFilter, priorityFilter, statusFilter, genCoverage, reqTests])
 
   /* ── Ingestion Summary Counts ───────────────────────────────────────────── */
 
@@ -1154,6 +1200,35 @@ export default function ArchitecturePage() {
           <option value="weak">Weak</option>
           <option value="unclear">Unclear</option>
         </select>
+
+        {/* Priority Filter */}
+        <select
+          value={priorityFilter}
+          onChange={e => setPriorityFilter(e.target.value)}
+          className="px-3 py-2 rounded-lg text-sm outline-none"
+          style={{ background: '#0a0a14', border: '1px solid #1e1e3a', color: '#94a3b8' }}
+        >
+          <option value="all">All Priority</option>
+          <option value="P0">P0</option>
+          <option value="P1">P1</option>
+          <option value="P2">P2</option>
+          <option value="P3">P3</option>
+        </select>
+
+        {/* Generation-status Filter (from genCoverage.by_requirement) */}
+        <select
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          disabled={!genCoverage}
+          title={genCoverage ? 'Filter by generation status' : 'Loading generation status…'}
+          className="px-3 py-2 rounded-lg text-sm outline-none disabled:opacity-50"
+          style={{ background: '#0a0a14', border: '1px solid #1e1e3a', color: '#94a3b8' }}
+        >
+          <option value="all">{genCoverage ? 'All Status' : 'Status (loading…)'}</option>
+          {DISPOSITION_ORDER.map(k => (
+            <option key={k} value={k}>{DISPOSITION_META[k]?.label || k}</option>
+          ))}
+        </select>
         {(() => {
           const scored = requirements.filter(r => getQuality(r))
           if (!scored.length) return null
@@ -1279,6 +1354,16 @@ export default function ArchitecturePage() {
             </div>
           )}
 
+          {/* Generation disposition summary (persistent — visible for API-driven runs too) */}
+          {currentProjectId && (
+            <GenerationCoveragePanel
+              projectId={currentProjectId}
+              coverage={genCoverage}
+              activeJob={activeJobProgress}
+              onSelectDisposition={setStatusFilter}
+            />
+          )}
+
           {/* Loading State */}
           {loading && (
             <div className="flex items-center justify-center py-12">
@@ -1348,6 +1433,22 @@ export default function ArchitecturePage() {
                     >
                       {req.priority}
                     </span>
+                    {(() => {
+                      const disp = genCoverage?.by_requirement?.[id]
+                      const m = disp && DISPOSITION_META[disp]
+                      if (!m) return null
+                      const meta = (req as any).metadata
+                      const reason = disp === 'not_automatable' ? meta?.not_automatable_reason
+                        : disp === 'gen_failed' ? 'generation failed (0 tests)'
+                        : disp === 'needs_attention' ? 'flagged for review' : ''
+                      return (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                              title={`${m.help}${reason ? ` — ${reason}` : ''}`}
+                              style={{ background: `${m.color}20`, color: m.color, border: `1px solid ${m.color}40` }}>
+                          {m.label}
+                        </span>
+                      )
+                    })()}
                   </span>
                 </div>
 

@@ -3471,6 +3471,51 @@ class AutomationEngineerAgent:
         if not tools_needed:
             tools_needed = [("playwright", "UI")]
 
+        # Scope allowlist (env ARTA_GEN_TOOL_ALLOWLIST, e.g. "playwright,newman").
+        # Restricts which tools are GENERATED without disturbing the risk-based
+        # tool choice — it simply drops out-of-scope tools (k6/zap/axe) from every
+        # requirement. Two wins: (1) honors an operator's declared tool scope;
+        # (2) cuts the per-req LLM sub-call count ~2-3x, which is the dominant
+        # cause of dense-req pipeline TimeoutError → 0-tests coverage gaps.
+        # Config-layer, reversible, NOT customer-specific. Empty/unset = no-op.
+        # Only applied when the intersection is non-empty, so a req whose risk
+        # tools are entirely out-of-scope is left for the downstream gates rather
+        # than silently zeroed.
+        import os as _os_allow
+        _allow_raw = _os_allow.environ.get("ARTA_GEN_TOOL_ALLOWLIST", "").strip()
+        if _allow_raw:
+            _allow = {t.strip().lower() for t in _allow_raw.split(",") if t.strip()}
+            _filtered = [(t, tt) for t, tt in tools_needed if str(t).lower() in _allow]
+            if _filtered and len(_filtered) < len(tools_needed):
+                _dropped = sorted({t for t, _ in tools_needed} - {t for t, _ in _filtered})
+                log.info(
+                    "ARTA_GEN_TOOL_ALLOWLIST=%s — %s: dropped out-of-scope tool(s) %s, keeping %s",
+                    sorted(_allow), req_id, _dropped, [t for t, _ in _filtered],
+                )
+                tools_needed = _filtered
+
+        # R300.C — Playwright is a UI tool. If the requirement is API-CONTRACT /
+        # backend (its Gherkin VERIFIES API responses, not the DOM), a Playwright
+        # spec has no UI to drive — historically it runs the slow LLM gen only to
+        # time out / be discarded (~25-35 min). Drop playwright so backend reqs go
+        # Newman-only (and, when their endpoints are streaming, R300.B blocks them
+        # fast). Uses the conservative R201 discriminator, which DEFAULTS to UI —
+        # so PW is KEPT whenever there is any real DOM intent (no UI coverage lost
+        # on ambiguous reqs). Only drops when another tool (newman) remains to
+        # cover the req. Killswitch ARTA_R300_C_PW_UI_ONLY_DISABLE=1.
+        if (_os_allow.environ.get("ARTA_R300_C_PW_UI_ONLY_DISABLE", "").lower() not in ("1", "true")
+                and len(tools_needed) > 1
+                and any(t == "playwright" for t, _ in tools_needed)
+                and self._r201_is_api_contract_requirement(
+                    risk if isinstance(risk, dict) else {}, combined_gherkin)):
+            _before_c = [t for t, _ in tools_needed]
+            tools_needed = [(t, tt) for t, tt in tools_needed if t != "playwright"]
+            self._last_tool_errors["playwright"] = (
+                "R300.C: API-contract/backend requirement (verifies API responses, "
+                "no UI surface) — Playwright (a UI tool) not applicable; Newman covers it")
+            log.info("R300.C: %s api-contract → dropped playwright (UI-only tool); %s -> %s",
+                     req_id, _before_c, [t for t, _ in tools_needed])
+
         # R213.K.16 — requirement→test-type validation. HTTP perf (k6) + API
         # (newman) tools REQUIRE the requirement to map to a real HTTP endpoint. An
         # gmail job to gmail_queue', 0 endpoints matching gmail/queue/job) has NO
@@ -3514,6 +3559,29 @@ class AutomationEngineerAgent:
                 log.warning(
                     "R300: %s pruned newman — streaming-only endpoint set "
                     "(not request→single-response testable)", req_id)
+
+                # R300.B — no-applicable-tool fast BLOCK. If pruning newman
+                # (streaming/backend req) leaves ONLY playwright, that PW spec is
+                # for a Core-Services API with no real UI surface: historically it
+                # grinds 3 LLM retries (~25-35 min) then TimeoutErrors to 0 tests
+                # — a COVERAGE GAP that also throttles the whole run. Drop PW too
+                # and return immediately with a truthful streaming_no_rest reason,
+                # so the req blocks in seconds (not a 30-min gen failure). Under a
+                # playwright+newman scope there is genuinely no applicable tool.
+                # Killswitch ARTA_R300_B_NO_APPLICABLE_TOOL_DISABLE=1.
+                if (_os_k16.environ.get("ARTA_R300_B_NO_APPLICABLE_TOOL_DISABLE", "").lower() not in ("1", "true")
+                        and tools_needed and all(t == "playwright" for t, _ in tools_needed)):
+                    tools_needed = []
+                    self._last_tool_errors["playwright"] = (
+                        "R300.B: streaming_no_rest — requirement endpoints are "
+                        "streaming/event (Newman-pruned) and it has no real UI "
+                        "surface, so there is no applicable tool under the "
+                        "playwright+newman scope (not a generation failure)")
+                    log.warning(
+                        "R300.B: %s no applicable tool after streaming prune "
+                        "(newman pruned + playwright inapplicable) — fast BLOCK "
+                        "streaming_no_rest instead of ~30min PW timeout", req_id)
+                    return self._r212_with_chain({})
 
         # R212 KEYSTONE (covers ALL strategies incl. the batch path that bypasses
         # _generate_playwright) — for an API-contract req with a derivable cm
@@ -3618,7 +3686,28 @@ class AutomationEngineerAgent:
         if (os.environ.get("ARTA_R253_PW_UNBATCH_DISABLE") != "1"
                 and any(t == "playwright" for t, _ in tools_needed)):
             try:
-                _pw_script = await self.generate_single(combined_gherkin, "playwright", risk)
+                # R127.B.CC — dense PW reqs (≥6 scenarios) truncate under the
+                # claude_code CLI (no max_tokens flag → output cut mid-emission →
+                # quarantine). Route them through the per-scenario decomposer,
+                # which gens small sub-specs bounded-parallel and merges them
+                # (failed subs become test.skip, so the parent still parses).
+                _pw_decompose = False
+                try:
+                    from .requirement_decomposer import should_decompose as _r127b_sd
+                    _pw_decompose = _r127b_sd(
+                        requirement={"id": req_id, "requirement_id": req_id},
+                        gherkin_text=combined_gherkin, tool_name="playwright",
+                        provider_tag=getattr(provider, "value", str(provider)))
+                except Exception:
+                    _pw_decompose = False
+                if _pw_decompose:
+                    log.info("R127.B.CC: dense Playwright for %s → per-scenario "
+                             "decomposition (claude_code truncation guard)", req_id)
+                    _pw_script = await self._r127_b_generate_decomposed(
+                        gherkin_text=combined_gherkin, tool="playwright",
+                        risk=risk, req_id=req_id)
+                else:
+                    _pw_script = await self.generate_single(combined_gherkin, "playwright", risk)
                 if _pw_script and getattr(_pw_script, "filename", None):
                     _r253_pw_scripts[_pw_script.filename] = _pw_script.content
                     if getattr(_pw_script, "metadata", None):
@@ -13255,6 +13344,19 @@ Output ONLY the JSON. No prose. One entry per item in this batch.
         generation entirely (verified in job f72bb035: 6 ATTACK + 0
         VERIFY → newman:0 → req marked Partial in the UI).
         """
+        # R340 — DROP the fictional-endpoint VERIFY synthesis by default. The old
+        # synthesizer injected a GET `{{base_url}}/api/baseline/{{baseline_id}}`
+        # ~9,245 grounding/no_api_surface blocks from this one injector). Its
+        # assertions were vacuous (oneOf([200,404]) + a no-op "state unchanged").
+        # The real security signal is the ATTACK item asserting the SUT rejected
+        # the payload (and ZAP for depth); a separate fictional baseline GET adds
+        # none. Default: synthesize nothing. Re-enable the legacy behavior with
+        # ARTA_BASELINE_VERIFY_SYNTH_ENABLE=1. (F14-2's hard-reject for missing
+        # VERIFY is correspondingly downgraded in _validate_newman_assertions.)
+        import os as _os_r340
+        if _os_r340.environ.get("ARTA_BASELINE_VERIFY_SYNTH_ENABLE") != "1":
+            return 0
+
         items = parsed.get("item", []) or []
         if not items:
             return 0
@@ -13421,12 +13523,22 @@ Output ONLY the JSON. No prose. One entry per item in this batch.
         verify_items = [it for it in items
                         if any(kw in (it.get("name") or "").lower() for kw in verify_kw)]
         if len(attack_items) >= 3 and len(verify_items) == 0:
-            raise RuntimeError(
+            # R340 — downgraded from hard-reject to WARN. The old rule forced a
+            # synthesized baseline-VERIFY (a fictional `/api/baseline` GET) just to
+            # pass; now that that synthesis is dropped, hard-rejecting here would
+            # fail generation for every security-heavy req. The ATTACK items
+            # already assert the SUT rejected the payload (4xx), which IS the
+            # verification; ZAP owns depth. Restore the hard-reject with
+            # ARTA_F14_2_VERIFY_HARDFAIL=1.
+            import os as _os_f142
+            _msg = (
                 f"Newman collection for {req_id} has {len(attack_items)} attack items "
-                f"(SQLi/XSS/injection) but ZERO VERIFY items. F2 requires SETUP/ATTACK/"
-                f"VERIFY — without VERIFY, the attack tests cannot prove the server "
-                f"rejected the payload."
+                f"(SQLi/XSS/injection) but ZERO separate VERIFY items — relying on the "
+                f"ATTACK items' own 4xx-rejection assertions (R340)."
             )
+            if _os_f142.environ.get("ARTA_F14_2_VERIFY_HARDFAIL") == "1":
+                raise RuntimeError(_msg)
+            log.warning(_msg)
 
     # ─── R18 — OpenAPI-aware Newman parameter placement ────────────────────
     #

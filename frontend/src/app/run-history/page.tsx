@@ -4,10 +4,9 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import LiveExecutionFeed from '@/components/LiveExecutionFeed'
 import { useProject } from '@/lib/project-context'
+import { apiRequest } from '@/lib/api-client'
 import RunDetailContent from './RunDetailContent'
 
-const API = ''
-const API_KEY = process.env.NEXT_PUBLIC_ARTA_API_KEY ?? ''
 
 type Run = {
   id: string
@@ -39,6 +38,18 @@ type Summary = {
   avg_duration_s: number
   gate_counts?: { PASS?: number; CONCERNS?: number; FAIL?: number; WAIVED?: number }
   trend: { run_id: string; started_at: string; pass_rate: number; coverage_pct: number; gate_decision: string }[]
+}
+
+// Consolidated "suite run" — the full-suite result summed across the many
+// batch-runs it was fragmented into (for the auth window).
+type SuiteRollup = {
+  keyed_by: string
+  run_count: number
+  passed: number; failed: number; blocked: number; skipped: number; total: number
+  pass_of_executed: number
+  started_at: string | null; completed_at: string | null
+  environment: string | null
+  reason_breakdown: { blocked: Record<string, number>; skip: Record<string, number> }
 }
 
 // BMAD TEA 4-outcome gate colors: PASS (emerald), CONCERNS (amber), FAIL (rose), WAIVED (violet)
@@ -101,8 +112,9 @@ function Sparkline({ values, color, height = 60 }: { values: number[]; color: st
 }
 
 export default function RunHistoryPage() {
-  const { currentProjectId, isLoading: projectLoading } = useProject()
+  const { currentProjectId, isLoading: projectLoading, switchProject } = useProject()
   const [summary,  setSummary]  = useState<Summary | null>(null)
+  const [suiteRollup, setSuiteRollup] = useState<SuiteRollup | null>(null)
   const [runs,     setRuns]     = useState<Run[]>([])
   const [selected, setSelected] = useState<RunDetail | null>(null)
   const [loading,  setLoading]  = useState(true)
@@ -111,29 +123,28 @@ export default function RunHistoryPage() {
   const pollRef = useRef<ReturnType<typeof setInterval>>(undefined)
   const initialSelectDone = useRef(false)
 
-  // Build auth headers fresh each time (avoids stale closure)
-  function getHeaders(): Record<string, string> {
-    const h: Record<string, string> = {}
-    const tok = typeof window !== 'undefined' ? localStorage.getItem('arta_token') || '' : ''
-    if (tok) h['Authorization'] = `Bearer ${tok}`
-    else if (API_KEY) h['X-API-Key'] = API_KEY
-    return h
-  }
-
   const loadRuns = useCallback(() => {
     const pidQs = currentProjectId ? `&project_id=${currentProjectId}` : ''
-    const h = getHeaders()
+    // apiRequest: Bearer + X-API-Key; a 401 (expired 60-min JWT) redirects to /login
+    // instead of the 401 body silently becoming an empty runs list.
     return Promise.all([
-      fetch(`${API}/api/execution/runs/summary?limit=10${pidQs}`, { headers: h }).then(r => r.json()),
-      fetch(`${API}/api/execution/runs?limit=10${pidQs}`,         { headers: h }).then(r => r.json()),
+      apiRequest<any>(`/api/execution/runs/summary?limit=10${pidQs}`),
+      apiRequest<any>(`/api/execution/runs?limit=10${pidQs}`),
     ])
-      .then(([s, r]) => { setSummary(s); setRuns(r.runs ?? []); setLoading(false); return r.runs ?? [] })
+      .then(([s, r]) => {
+        setSummary(s); setRuns(r.runs ?? []); setLoading(false)
+        if (currentProjectId) {
+          apiRequest<SuiteRollup>(`/api/execution/runs/suite-rollup?project_id=${currentProjectId}`)
+            .then((sr: SuiteRollup) => setSuiteRollup(sr)).catch(() => {})
+        }
+        return r.runs ?? []
+      })
       .catch(() => {
         return new Promise<Run[]>(resolve => {
           setTimeout(() => {
             Promise.all([
-              fetch(`${API}/api/execution/runs/summary?limit=10${pidQs}`, { headers: h }).then(r => r.json()),
-              fetch(`${API}/api/execution/runs?limit=10${pidQs}`,         { headers: h }).then(r => r.json()),
+              apiRequest<any>(`/api/execution/runs/summary?limit=10${pidQs}`),
+              apiRequest<any>(`/api/execution/runs?limit=10${pidQs}`),
             ])
               .then(([s, r]) => { setSummary(s); setRuns(r.runs ?? []); resolve(r.runs ?? []) })
               .catch(e => { setError(String(e)); resolve([]) })
@@ -149,9 +160,23 @@ export default function RunHistoryPage() {
     loadRuns()
   }, [currentProjectId, projectLoading, loadRuns])
 
+  // Drill the consolidated suite card into the existing run-detail panel: fetch a
+  // synthetic RunDetail aggregating the suite's per-test results and setSelected it
+  // directly (NOT via selectRun, which re-fetches /runs/{id} and would 404 on the
+  // synthetic suite id).
+  const loadSuiteDetail = useCallback(() => {
+    if (!currentProjectId) return
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = undefined }
+    // apiRequest: Bearer + X-API-Key, and a 401 (expired 60-min JWT) redirects to
+    // /login instead of the panel rendering the error body as a run.
+    apiRequest<RunDetail>(`/api/execution/runs/suite-detail?project_id=${currentProjectId}`)
+      .then((d: RunDetail) => setSelected(d))
+      .catch(() => {})
+  }, [currentProjectId])
+
   // Auto-select run from URL param (e.g., ?run_id=run-xxx) — no useSearchParams needed
   useEffect(() => {
-    if (initialSelectDone.current || runs.length === 0) return
+    if (initialSelectDone.current || loading) return
     if (typeof window === 'undefined') return
     const params = new URLSearchParams(window.location.search)
     const runIdParam = params.get('run_id')
@@ -160,13 +185,26 @@ export default function RunHistoryPage() {
       if (match) {
         initialSelectDone.current = true
         selectRun(match)
+      } else {
+        // Not in the loaded top-10 (a batch run linked from the suite report,
+        // or a static report's "Back to ARTA" link while another project is
+        // selected — possibly with 0 runs). Fetch by id so the deep-link opens
+        // regardless of the list; /runs/{id} accepts the uuid or the text run_id.
+        initialSelectDone.current = true
+        fetchRunDetail(runIdParam).then((d: RunDetail) => {
+          setSelected(d)
+          // Follow the run's project so the sidebar/table match what's open
+          // (a static report's Back link can land here with another project selected).
+          const pid = (d as any)?.project_id as string | undefined
+          if (pid && pid !== currentProjectId) switchProject(pid)
+        }).catch(() => {})
       }
     }
-  }, [runs])
+  }, [runs, loading, currentProjectId, switchProject])
 
   const fetchRunDetail = useCallback((runId: string) => {
-    return fetch(`${API}/api/execution/runs/${runId}`, { headers: getHeaders() })
-      .then(r => r.json())
+    // Same auth contract as the rest of the app (see loadSuiteDetail).
+    return apiRequest<RunDetail>(`/api/execution/runs/${encodeURIComponent(runId)}`)
   }, [])
 
   const selectRun = useCallback((run: Run) => {
@@ -230,11 +268,63 @@ export default function RunHistoryPage() {
           </div>
         )}
 
+        {/* Latest Suite Run — the consolidated full-suite result, summed across
+            the many batch-runs it was fragmented into. The single view the raw
+            per-batch run rows can't show. */}
+        {suiteRollup && suiteRollup.total > 0 && (
+          <div className="rounded-xl p-5 mb-6 cursor-pointer transition-colors hover:brightness-110"
+               style={{ background: '#12121f', border: '1px solid #1c6d66' }}
+               onClick={loadSuiteDetail}
+               role="button" tabIndex={0}
+               onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') loadSuiteDetail() }}>
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <div>
+                <p className="text-sm font-semibold" style={{ color: '#e2e8f0' }}>
+                  Latest Suite Run — consolidated <span style={{ color: '#4fb9ae' }}>· view detailed results →</span>
+                </p>
+                <p className="text-xs" style={{ color: '#64748b' }}>
+                  {suiteRollup.run_count} batch runs · {suiteRollup.keyed_by} · summed across the full suite
+                </p>
+              </div>
+              <div className="text-right">
+                <span className="text-3xl font-bold" style={{ color: '#34d399', fontFamily: "'Space Mono',monospace" }}>{suiteRollup.pass_of_executed}%</span>
+                <span className="text-xs ml-1" style={{ color: '#64748b' }}>pass of executed</span>
+              </div>
+            </div>
+            <div className="flex h-9 rounded-lg overflow-hidden mb-2" style={{ border: '1px solid #1e1e3a' }}>
+              {(([['PASS', suiteRollup.passed, '#2c8a5b'], ['FAIL', suiteRollup.failed, '#c24a3e'], ['BLOCKED', suiteRollup.blocked, '#b27a16'], ['SKIP', suiteRollup.skipped, '#7c8a90']]) as [string, number, string][]).map(([lab, n, c]) =>
+                n > 0 ? (
+                  <div key={lab} title={`${lab}: ${n}`} className="flex items-center justify-center text-xs font-semibold"
+                       style={{ flex: n, background: c, color: '#fff', minWidth: 0 }}>
+                    {n > suiteRollup.total * 0.06 ? `${lab} ${n}` : n}
+                  </div>
+                ) : null)}
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs mb-1" style={{ color: '#94a3b8' }}>
+              <span>PASS {suiteRollup.passed}</span><span>FAIL {suiteRollup.failed}</span><span>BLOCKED {suiteRollup.blocked}</span><span>SKIP {suiteRollup.skipped}</span>
+            </div>
+            {(Object.keys(suiteRollup.reason_breakdown?.blocked || {}).length > 0 || Object.keys(suiteRollup.reason_breakdown?.skip || {}).length > 0) && (
+              <div className="grid md:grid-cols-2 gap-5 mt-3 text-xs">
+                {(['blocked', 'skip'] as const).map(kind => (
+                  <div key={kind}>
+                    <p className="mb-1" style={{ color: '#64748b' }}>{kind === 'blocked' ? 'Why blocked' : 'Why skipped'}</p>
+                    {Object.entries(suiteRollup.reason_breakdown[kind]).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => (
+                      <div key={k} className="flex justify-between py-0.5" style={{ color: '#94a3b8' }}>
+                        <span>{k}</span><span style={{ fontFamily: "'Space Mono',monospace" }}>{v}</span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Summary stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           {[
-            { label: 'Total Runs',    value: summary ? String(summary.total_runs)       : '—', unit: 'last 10',   color: '#a5b4fc' },
-            { label: 'Avg Pass Rate', value: summary ? `${summary.avg_pass_rate}`        : '—', unit: '%',         color: '#34d399' },
+            { label: 'Suite Runs',  value: suiteRollup ? String(suiteRollup.run_count) : (summary ? String(summary.total_runs) : '—'), unit: suiteRollup ? 'batches' : 'last 10', color: '#a5b4fc' },
+            { label: 'Pass Rate',   value: suiteRollup ? `${suiteRollup.pass_of_executed}` : (summary ? `${summary.avg_pass_rate}` : '—'), unit: suiteRollup ? '% exec' : '%', color: '#34d399' },
             { label: 'Avg Duration',  value: summary ? fmtDuration(summary.avg_duration_s) : '—', unit: '',       color: '#22d3ee' },
             { label: 'Gate: PASS',    value: summary ? String(summary?.gate_counts?.PASS ?? 0) : '—', unit: 'runs', color: '#34d399' },
           ].map(m => (
@@ -310,6 +400,34 @@ export default function RunHistoryPage() {
             </div>
             {loading && (
               <div className="px-5 py-8 text-sm text-center" style={{ color: '#94a3b8' }}>Loading runs…</div>
+            )}
+            {/* Pinned consolidated SUITE row — the whole suite as one clickable
+                entry (the batch rows below are its 5-req slices). Click → detail. */}
+            {!loading && suiteRollup && suiteRollup.total > 0 && (
+              <div onClick={loadSuiteDetail}
+                   role="button" tabIndex={0}
+                   onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') loadSuiteDetail() }}
+                   className="grid cursor-pointer px-5 py-3 text-sm transition-colors hover:brightness-110"
+                   style={{ gridTemplateColumns: '110px 150px 1fr 90px 100px 80px 70px',
+                            borderBottom: '2px solid #1c6d66',
+                            background: String(selected?.id || '').startsWith('suite-') ? 'rgba(28,109,102,0.18)' : 'rgba(28,109,102,0.07)' }}>
+                <span style={{ color: '#4fb9ae', fontFamily: 'monospace', fontSize: 12, fontWeight: 700 }}>◆ SUITE</span>
+                <span style={{ color: '#94a3b8', fontSize: 11 }}>{suiteRollup.keyed_by}</span>
+                <div className="min-w-0">
+                  <p className="truncate text-xs" style={{ color: '#e2e8f0' }}>Consolidated full suite</p>
+                  <p className="text-xs" style={{ color: '#64748b' }}>{suiteRollup.run_count} batch runs · view detailed results</p>
+                </div>
+                <span className="self-center text-xs px-2 py-0.5 rounded"
+                      style={{ background: 'rgba(28,109,102,0.2)', color: '#4fb9ae' }}>{suiteRollup.environment || '—'}</span>
+                <span className="self-center text-xs" style={{ fontFamily: 'monospace', color: '#94a3b8' }}>
+                  {suiteRollup.passed}/{suiteRollup.failed}/{suiteRollup.skipped}/{suiteRollup.blocked}
+                </span>
+                <span className="self-center text-xs" style={{ color: '#64748b' }}>&mdash;</span>
+                <span className="self-center text-xs font-semibold px-2 py-0.5 rounded"
+                      style={{ background: GATE_BG[suiteRollup.failed > 0 ? 'FAIL' : 'PASS'], color: GATE_COLOR[suiteRollup.failed > 0 ? 'FAIL' : 'PASS'], fontFamily: "'Space Mono',monospace" }}>
+                  {suiteRollup.failed > 0 ? 'FAIL' : 'PASS'}
+                </span>
+              </div>
             )}
             {!loading && runs.map(r => (
               <div key={r.id}

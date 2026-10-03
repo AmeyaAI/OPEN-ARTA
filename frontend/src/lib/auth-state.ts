@@ -29,6 +29,10 @@ export interface AuthState {
   expires_at?: string | null
   expired_at?: string | null
   message?: string
+  // True when the env can auto-login server-side from stored username/password
+  // (via a configured login_capture script) — the modal then offers a one-click
+  // "Auto-login with stored credentials" instead of manual token paste.
+  credential_login_available?: boolean
 }
 
 export interface AuthStateUpdateResult {
@@ -140,6 +144,21 @@ export async function postAuthState(
     body: JSON.stringify(body),
   })
   return jsonOrThrow<AuthStateUpdateResult>(res)
+}
+
+/**
+ * Server-side credential auto-login: runs the env's configured login_capture
+ * script from the project's STORED username/password and seeds fresh auth-state.
+ * BFF/OAuth flow. Only available when `AuthState.credential_login_available`.
+ */
+export async function credentialLogin(
+  projectId: string,
+  environment: string,
+): Promise<AuthStateUpdateResult & { source?: string; refresh_token_present?: boolean }> {
+  const url = `${API_BASE}/api/projects/${encodeURIComponent(projectId)}/auth-state/credential-login` +
+              `?environment=${encodeURIComponent(environment)}`
+  const res = await fetch(url, { method: 'POST', headers: authHeaders() })
+  return jsonOrThrow<AuthStateUpdateResult & { source?: string; refresh_token_present?: boolean }>(res)
 }
 
 /**

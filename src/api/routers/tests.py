@@ -2828,6 +2828,36 @@ async def generate_tests(body: GenerateRequest, request: Request):
                 await _asyncio.sleep(wait)
                 continue
             break
+    # Opt-in throttle-degrade (ARTA_RISK_DEGRADE_ON_TIMEOUT=1): when risk scoring
+    # TIMES OUT (account rate-throttle, e.g. bulk gen on a personal Claude Max
+    # plan), fall back to a risk profile seeded from the requirement's REAL Jira
+    # priority — NOT keyword-inference (which the design rightly forbids as
+    # fabrication). Grounded in real priority + tagged degraded=True so the
+    # quality gate + Strategy-review queue flag it. Lets gen proceed under
+    # throttle instead of 0-tests. Default OFF → fail-loud exactly as before.
+    if _risk_exc is not None and os.environ.get("ARTA_RISK_DEGRADE_ON_TIMEOUT", "").lower() in ("1", "true") \
+            and isinstance(_risk_exc, (_asyncio.TimeoutError, TimeoutError)):
+        from ...agents.strategy_architect import RiskProfile as _RiskProfile, risk_action as _risk_action
+        _pri = (str(requirement.get("priority") or "P2")).upper()
+        _imp, _prob, _score = {"P0": (3, 3, 9), "P1": (3, 2, 6),
+                               "P2": (2, 2, 4), "P3": (2, 1, 2)}.get(_pri, (2, 2, 4))
+        _uiish = str(body.requirement_id).upper().startswith("KUI") \
+            or "ui" in str(requirement.get("title", "")).lower()
+        risk_profiles = [_RiskProfile(
+            requirement_id=body.requirement_id, priority=_pri,
+            impact=_imp, probability=_prob, risk_score=_score,
+            risk_action=_risk_action(_score),
+            rationale=("DEGRADED: risk-scoring LLM timed out (account throttle); profile "
+                       "derived from the requirement's real Jira priority pending review."),
+            test_types=(["UI", "API"] if _uiish else ["API"]),
+            coverage_target_pct=80,
+            recommended_tools=(["playwright", "newman"] if _uiish else ["newman"]),
+            regulatory_tags=[], warnings=["risk_scoring_timeout_degraded"],
+            degraded=True, degraded_reason="risk_scoring_timeout_throttle")]
+        log.warning("[%s] RISK DEGRADE (throttle opt-in): priority-derived %s profile; gen proceeds",
+                    body.requirement_id, _pri)
+        _risk_exc = None
+
     if _risk_exc is not None:
         # Fail-Fast/Explain-Clearly: the previous keyword-inference fallback
         # FABRICATED a risk profile (priority/test_types/tools guessed from
@@ -3905,7 +3935,11 @@ async def generate_tests(body: GenerateRequest, request: Request):
     ).lower() or (
         getattr(request.app.state, "llm_provider", "anthropic") or "anthropic"
     ).lower()
-    _base_auto_timeout = 2400.0 if _provider_for_timeout == "ollama" else 600.0
+    # Base outer automation timeout per attempt. Env-tunable (ARTA_AUTO_TIMEOUT_BASE)
+    # so an operator can trade a lower ceiling (faster failure of un-generatable
+    # reqs → higher throughput) against headroom for genuinely large reqs.
+    _base_auto_timeout = 2400.0 if _provider_for_timeout == "ollama" else \
+        float(os.environ.get("ARTA_AUTO_TIMEOUT_BASE", "600"))
     # Scale the outer timeout by requirement SIZE. A flat 600s fits a typical
     # scenarios → 144 Newman items via chunked gen) blew the flat window and
     # timed out → ALL tools discarded → 0 tests (run 333c9636). The gen isn't
@@ -3921,7 +3955,7 @@ async def generate_tests(body: GenerateRequest, request: Request):
     else:
         _outer_auto_timeout = min(
             _base_auto_timeout + 12.0 * max(0, _scn - 15),
-            _base_auto_timeout + 900.0,
+            _base_auto_timeout + float(os.environ.get("ARTA_AUTO_TIMEOUT_MAX_BONUS", "900")),
         )
     if _scn > 15:
         log.info("[%s] outer auto-timeout scaled to %.0fs for %d scenarios "
@@ -5922,6 +5956,12 @@ async def generate_all_tests(
         "'REQ-XY-001,REQ-XY-010'). Scopes the async regen to exactly those "
         "requirements — the fast per-requirement iteration loop.",
     ),
+    tools: str | None = Query(
+        None,
+        description="Optional comma-separated tool override (e.g. 'newman'). Passed "
+        "through to each per-requirement GenerateRequest.tools so a scoped regen "
+        "touches ONLY those tools' scripts (other tools' tests are kept).",
+    ),
     request: Request = None,
 ):
     """Kick off async test generation for a project's requirements.
@@ -6021,7 +6061,9 @@ async def generate_all_tests(
     }
 
     # H4: Supervise the background task — log unhandled exceptions and mark job failed.
-    bg_task = _aio.create_task(_generate_all_background(job_id, project_id, reqs, request, force=force))
+    _tools_override = [t.strip() for t in (tools or "").split(",") if t.strip()] or None
+    bg_task = _aio.create_task(_generate_all_background(
+        job_id, project_id, reqs, request, force=force, tools=_tools_override))
 
     def _on_done(task: _aio.Task, _job_id: str = job_id):
         if task.cancelled():
@@ -6149,6 +6191,161 @@ async def generate_all_last(project_id: str = Query(...)):
         return json.loads(json.dumps(candidates[0], default=str))
     except Exception:
         return {"status": "none"}
+
+
+@router.get("/generate-all/coverage", dependencies=[Depends(_require_api_key)])
+async def generation_coverage(project_id: str = Query(...)):
+    """Project-level generation DISPOSITION summary — the persistent, API-run-visible
+    surface for: automated / not_automatable / gen_failed / needs_attention / pending.
+
+    Unlike the per-job status endpoints, this unions every generate-all job for the
+    project (the run fires one job PER BAND) reduced last-write-wins per requirement,
+    so a req that failed in an early band but regenerated later reads `automated`.
+    Pure read; tolerant of records being written concurrently by the running job.
+    Buckets are mutually exclusive and sum to `total` (same invariant as the
+    scratchpad coverage manifest)."""
+    import glob as _glob
+    from .requirements import PROJECT_REQUIREMENTS, hydrate_project_requirements_from_db
+    try:
+        from ...agents.testability_classifier import classify_automatable as _classify
+    except Exception:
+        _classify = None
+
+    # Requirements (hydrate from DB if the in-memory sidecar is cold).
+    reqs = PROJECT_REQUIREMENTS.get(project_id) or []
+    if not reqs:
+        try:
+            await hydrate_project_requirements_from_db(project_id)
+            reqs = PROJECT_REQUIREMENTS.get(project_id) or []
+        except Exception:
+            reqs = []
+
+    def _rid(r):
+        # getReqId(req) so `by_requirement` keys resolve on each card, and it is
+        # what the on-disk spec-stem check depends on. Never lead with a UUID `id`.
+        return str(r.get("req_id") or r.get("requirement_id") or r.get("id") or "")
+    def _stem(i):
+        return i.lower().replace("-", "_")
+
+    # On-disk specs → automated set; .broken-dryrun → quarantined set.
+    try:
+        pw = {os.path.basename(p)[:-8] for p in _glob.glob("src/automation/playwright/*.spec.ts")}
+        nm = {os.path.basename(p)[:-9] for p in _glob.glob("src/automation/newman/*_api.json")}
+        broken = {os.path.basename(p).split(".spec.ts")[0]
+                  for p in _glob.glob("src/automation/playwright/*.broken*")}
+        # Other tools' scripts count as automation too (a k6/ZAP-only req is
+        # still scripted). Stems: <req>_performance.js / <req>_security_scan.yaml.
+        k6 = {os.path.basename(p)[:-len("_performance.js")]
+              for p in _glob.glob("src/automation/k6/*_performance.js")}
+        zap = {os.path.basename(p)[:-len("_security_scan.yaml")]
+               for p in _glob.glob("src/automation/zap/*_security_scan.yaml")}
+    except Exception:
+        pw, nm, broken, k6, zap = set(), set(), set(), set(), set()
+
+    # A Newman file on disk is NOT proof of automation: R67.A writes a 0-request
+    # refusal stub (`_arta_meta.gen_refused`, e.g. openapi_cache_empty) that the
+    # counted "automated". Classify them as gen_failed with the refusal reason.
+    nm_refused: dict[str, str] = {}
+    try:
+        for _p in _glob.glob("src/automation/newman/*_api.json"):
+            try:
+                with open(_p, "r", encoding="utf-8") as _fh:
+                    _head = _fh.read(1500)
+                if '"gen_refused": true' in _head:
+                    import re as _re_r
+                    _m = _re_r.search(r'"gen_refusal_reason":\s*"([^"]+)"', _head)
+                    nm_refused[os.path.basename(_p)[:-9]] = _m.group(1) if _m else "refused"
+            except OSError:
+                continue
+    except Exception:
+        nm_refused = {}
+
+    # Reduce job results across ALL of the project's jobs, last-write-wins per req
+    # (jobs applied oldest→newest so the newest disposition wins).
+    job_result: dict[str, dict] = {}
+    try:
+        _pjobs = sorted(
+            (j for j in _GENERATE_ALL_JOBS.values() if j.get("project_id") == project_id),
+            key=lambda j: j.get("started_at", ""),
+        )
+        for j in _pjobs:
+            for res in (j.get("results") or []):
+                rid = str(res.get("requirement_id") or "")
+                if rid:
+                    job_result[rid] = res
+    except Exception:
+        job_result = {}
+
+    buckets = {"automated": [], "not_automatable": [], "gen_failed": [],
+               "needs_attention": [], "pending": []}
+    samples = {k: [] for k in buckets}
+    by_requirement: dict[str, str] = {}   # compact per-req disposition (slug -> key)
+
+    def _add(bucket, rid, reason=""):
+        buckets[bucket].append(rid)
+        by_requirement[rid] = bucket
+        if len(samples[bucket]) < 25:
+            samples[bucket].append({"req_id": rid, "reason": reason})
+
+    for r in reqs:
+        rid = _rid(r)
+        if not rid:
+            continue
+        st = _stem(rid)
+        meta = r.get("metadata") if isinstance(r.get("metadata"), dict) else {}
+        res = job_result.get(rid) or {}
+        # Precedence: automated → not_automatable → gen_failed → needs_attention → pending
+        # (a refused Newman stub with no real PW spec is gen_failed, checked FIRST —
+        # its hollow per-AC test cases inflate `test_count` too).
+        if st in nm_refused and st not in pw:
+            _add("gen_failed", rid, f"newman gen refused: {nm_refused[st]}")
+        # "automated" = a REAL script on disk for some tool. The old job-result
+        # `test_count > 0` clause is gone: it counted the stub era's hollow
+        # per-AC rows, so purged/refused reqs read "automated" with no script.
+        elif st in pw or (st in nm and st not in nm_refused) or st in k6 or st in zap:
+            _add("automated", rid)
+        elif meta.get("not_automatable") or (
+            _classify is not None and not _classify(r)[0]
+        ):
+            _add("not_automatable", rid,
+                 meta.get("not_automatable_reason")
+                 or (res.get("not_automatable_reason") if res else "")
+                 or (_classify(r)[1] if _classify else ""))
+        elif res.get("gen_failed") or res.get("coverage_gap"):
+            import re as _re
+            _cause = str(res.get("coverage_gap_cause") or "no_tests_generated")
+            # R300.B streaming/no-applicable-tool reqs are OUT OF SCOPE for the
+            # playwright+newman toolset, not real generation failures — bucket
+            # them truthfully as not_automatable, reserve gen_failed for hard fails.
+            if _re.search(r"streaming_no_rest|no applicable tool|R300\.B", _cause, _re.IGNORECASE):
+                _add("not_automatable", rid, "streaming/backend — not testable via Playwright/Newman")
+            else:
+                _add("gen_failed", rid, _cause[:120])
+        elif st in broken or meta.get("needs_attention") or meta.get("potentially_incorrect"):
+            _add("needs_attention", rid, "quarantined" if st in broken else "flagged")
+        else:
+            _add("pending", rid)
+
+    total = len(reqs)
+    counts = {k: len(v) for k, v in buckets.items()}
+    summed = sum(counts.values())
+    latest = None
+    try:
+        _c = [j for j in _GENERATE_ALL_JOBS.values() if j.get("project_id") == project_id]
+        _c.sort(key=lambda j: j.get("started_at", ""), reverse=True)
+        latest = _c[0].get("job_id") if _c else None
+    except Exception:
+        latest = None
+    return {
+        "project_id": project_id,
+        "total": total,
+        "buckets": counts,
+        "complete": summed == total and counts["pending"] == 0 and counts["gen_failed"] == 0,
+        "sum_check": summed,
+        "samples": samples,
+        "by_requirement": by_requirement,
+        "latest_job_id": latest,
+    }
 
 
 @router.get("/generate-all/stream/{job_id}", dependencies=[Depends(_require_api_key)])
@@ -6578,7 +6775,8 @@ async def regenerate_by_tool(
     }
 
 
-async def _generate_all_background(job_id: str, project_id: str, reqs: list, request, force: bool = False):
+async def _generate_all_background(job_id: str, project_id: str, reqs: list, request, force: bool = False,
+                                   tools: list[str] | None = None):
     """Background worker: generates tests for each requirement sequentially."""
     from datetime import datetime, timezone
     job = _GENERATE_ALL_JOBS[job_id]
@@ -6772,6 +6970,48 @@ async def _generate_all_background(job_id: str, project_id: str, reqs: list, req
             _save_job_json(job)
             return   # R130.G: was `continue` in for-loop; closure uses return
 
+        # C4.5 / Testability gate — skip requirements that are genuinely NOT
+        # test-automatable (CVE-triage / dependency bumps / doc-spike). This is a
+        # truthful "verified by inspection" disposition, NOT a deletion: the req is
+        # stamped not_automatable + needs_attention (durable via _save_requirements)
+        # and surfaced for human review, instead of burning LLM quota on a
+        # 100%-failing hollow spec. Conservative + fail-open. Killswitch:
+        # ARTA_TESTABILITY_GATE_DISABLE=1.
+        try:
+            from ...agents.testability_classifier import classify_automatable
+            _auto, _reason_code, _reason_text = classify_automatable(req)
+        except Exception as _tc_exc:
+            _auto, _reason_code, _reason_text = True, "", ""  # fail-open
+            log.debug("testability classifier failed for %s (non-fatal): %s", req_id, _tc_exc)
+        if not _auto:
+            log.info(
+                "generate-all [%s]: skipping %s — not_automatable (%s)",
+                job_id, req_id, _reason_code,
+            )
+            try:
+                _meta = req.setdefault("metadata", {})
+                if isinstance(_meta, dict):
+                    _meta["not_automatable"] = True
+                    _meta["not_automatable_reason"] = _reason_code
+                    _meta["needs_attention"] = True
+                    from .requirements import _save_requirements as _save_reqs
+                    _save_reqs()
+            except Exception as _stamp_exc:
+                log.debug("could not stamp not_automatable on %s (non-fatal): %s", req_id, _stamp_exc)
+            job["results"].append({
+                "requirement_id": req_id,
+                "status": "skipped",
+                "test_count": 0,
+                "tests_retained": 0,
+                "tools": {},
+                "skip_reason": "not_automatable",
+                "not_automatable_reason": _reason_code,
+                "not_automatable_detail": _reason_text,
+            })
+            job["completed"] += 1
+            _save_job_json(job)
+            return
+
         # C1: Resolve LLM client for this specific requirement
         # This ensures we use Ollama if configured, but can still detect rate limits
         client = None
@@ -6845,7 +7085,7 @@ async def _generate_all_background(job_id: str, project_id: str, reqs: list, req
         job["current_stage_started_at"] = None
         _req_started_at = _time_bg.monotonic()
         try:
-            gen_body = GenerateRequest(requirement_id=req_id, force=force)
+            gen_body = GenerateRequest(requirement_id=req_id, force=force, tools=list(tools or []))
             result = _normalize_generate_result(await generate_tests(gen_body, request))
             test_count = result.get("test_count", 0)
             tests = result.get("tests_generated", [])

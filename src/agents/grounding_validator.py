@@ -235,7 +235,7 @@ def validate_newman_grounded(
         # 2. Endpoint match (templated)
         method = (request.get("method") or "GET").upper()
         path = _extract_path_from_url(url) if url else ""
-        _shape_ok = not (path and captured_keys) or _path_matches_captured(method, path, captured_keys)
+        _shape_ok = not (path and captured_keys) or _endpoint_known(method, path, captured_keys, openapi_spec)
         # 2b. G1 (R305) — path-parameter VALUE grounding. The shape check above
         # wildcards every `{param}` slot, so a wrong enum value (region=global on
         # a us-texas-1-only resource → 404) shape-matches and passes. Ground the
@@ -260,7 +260,7 @@ def validate_newman_grounded(
                         f"  {path.replace('/' + _bad_val + '/', '/' + _allowed[0] + '/')}"
                     ),
                 ))
-        if path and captured_keys and not _path_matches_captured(method, path, captured_keys):
+        if path and captured_keys and not _endpoint_known(method, path, captured_keys, openapi_spec):
             # R111.F — surface VALID ALTERNATIVES at violation construction so the
             # LLM sees them on retry-1 (not deferred until format_violations_as_hint
             # is called downstream). Mirrors R93.B + R104.B alternatives idiom.
@@ -901,8 +901,33 @@ def _r111_g_validate_assertion_fields(
         "deep", "length", "match", "status", "json", "text",
         "headers", "code",
     }
+    # R330.G — JS array/string/object methods & props that chain off a REAL
+    # schema field (e.g. `json.organizations.length`, `clusters.some`,
+    # `members.map`). Pre-fix these were validated as if `.length`/`.some`
+    # were schema fields → `organizations.length` not in the response schema
+    # ~10.4k of the 16.9k grounding blocks (the `.length`/`.some`/`.map`
+    # cluster on real list endpoints). Fix: strip trailing method/prop
+    # segments so only the real schema path (`organizations`) is validated.
+    # Killswitch ARTA_R330_G_JS_METHOD_STRIP_DISABLE=1.
+    _JS_METHODS = {
+        "length", "some", "every", "map", "filter", "find", "findIndex",
+        "includes", "indexOf", "lastIndexOf", "forEach", "reduce", "reduceRight",
+        "slice", "splice", "concat", "join", "split", "sort", "reverse", "flat",
+        "flatMap", "keys", "values", "entries", "push", "pop", "shift", "unshift",
+        "toString", "valueOf", "hasOwnProperty", "trim", "toLowerCase",
+        "toUpperCase", "startsWith", "endsWith", "charAt", "replace", "match",
+        "padStart", "padEnd", "at",
+    }
+    _r330g_strip_disabled = _os_r150g.environ.get(
+        "ARTA_R330_G_JS_METHOD_STRIP_DISABLE") == "1"
     for m in _access_re.finditer(script_text):
         full_path = m.group(2)
+        # R330.G — peel trailing JS method/prop segments before schema checks.
+        if not _r330g_strip_disabled and "." in full_path:
+            _segs = full_path.split(".")
+            while len(_segs) > 1 and _segs[-1] in _JS_METHODS:
+                _segs.pop()
+            full_path = ".".join(_segs)
         first_segment = full_path.split(".", 1)[0]
         if full_path in seen_fields:
             continue
@@ -1305,6 +1330,37 @@ def _path_matches_captured(
                 break
         if match:
             return True
+    return False
+
+
+def _endpoint_known(
+    method: str, path: str, captured_keys: set[tuple[str, str]],
+    openapi_spec: dict | None,
+) -> bool:
+    """R340 — an endpoint is KNOWN when it matches the captured surface OR the
+    SUT's OpenAPI contract templates. Pre-R340 only `captured_endpoints` counted,
+    so real contract paths discovery never exercised (e.g. storage/share-types,
+    notifications/webhooks, project-scoped file-stores — all declared in the
+    bundled `.arta/openapi/<pid>.json` as `{region}`/`{project}` templates) were
+    falsely flagged `unknown_endpoint`. HEAD/OPTIONS fall back to the GET variant
+    (a read, with/without a body). The OpenAPI-aware matcher already exists
+    (`openapi_cache.lookup_endpoint`) and is reused here.
+    Killswitch ARTA_ENDPOINT_OPENAPI_CREDIT_DISABLE=1 → captured-only (legacy)."""
+    if _path_matches_captured(method, path, captured_keys):
+        return True
+    if os.environ.get("ARTA_ENDPOINT_OPENAPI_CREDIT_DISABLE") == "1":
+        return False
+    try:
+        from .openapi_cache import lookup_endpoint as _le
+        if _le(openapi_spec, method, path) is not None:
+            return True
+        if method in ("HEAD", "OPTIONS"):
+            if _path_matches_captured("GET", path, captured_keys):
+                return True
+            if _le(openapi_spec, "GET", path) is not None:
+                return True
+    except Exception:
+        pass
     return False
 
 

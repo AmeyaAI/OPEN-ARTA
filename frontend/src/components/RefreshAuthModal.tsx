@@ -27,7 +27,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { postAuthState, decodeJwtPayload, type AuthState } from '@/lib/auth-state'
+import { postAuthState, credentialLogin, decodeJwtPayload, type AuthState } from '@/lib/auth-state'
 
 // R15-V4 — single-source-of-truth bookmarklet payload. Operator drags
 // this into bookmarks bar ONCE per ARTA install. Works for any SUT
@@ -75,6 +75,9 @@ export default function RefreshAuthModal({
   // peripheral state SPAs may need beyond the main session cookie.
   const [fullCaptureJSON, setFullCaptureJSON] = useState('')
   const [fullCaptureError, setFullCaptureError] = useState<string | null>(null)
+  // Credential auto-login (username/password server-side login) state.
+  const [autoLoginBusy, setAutoLoginBusy] = useState(false)
+  const [autoLoginError, setAutoLoginError] = useState<string | null>(null)
 
   // Reset internal state when modal opens
   useEffect(() => {
@@ -304,6 +307,24 @@ export default function RefreshAuthModal({
     }
   }
 
+  // Server-side credential auto-login — runs the env's login_capture script from
+  // the project's stored username/password. No paste/bookmarklet. On success,
+  // dequeues the pending Run Suite via onSuccess().
+  async function handleCredentialLogin() {
+    if (!projectId || !environment) return
+    setAutoLoginBusy(true)
+    setAutoLoginError(null)
+    try {
+      await credentialLogin(projectId, environment)
+      await onSuccess()
+      onClose()
+    } catch (e) {
+      setAutoLoginError((e as Error).message ?? 'Auto-login failed — check stored credentials and the dashboard logs.')
+    } finally {
+      setAutoLoginBusy(false)
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center"
          role="dialog" aria-modal="true" aria-labelledby="refresh-auth-modal-title">
@@ -352,6 +373,39 @@ export default function RefreshAuthModal({
             <span>{initialState.message}</span>
           )}
         </div>
+
+        {/* Credential auto-login — primary path for username/password SUTs.
+            Runs the login server-side from stored creds; no
+            paste/bookmarklet. Manual paste stays below as the fallback. */}
+        {initialState?.credential_login_available && (
+          <div className="rounded-lg p-3 mb-4"
+               style={{ background: '#0a1420', border: '1px solid #1c6d66' }}>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold" style={{ color: '#e2e8f0' }}>
+                  🔑 Auto-login with stored credentials
+                </div>
+                <div className="text-xs mt-0.5" style={{ color: '#94a3b8' }}>
+                  Logs into the SUT server-side from the saved username/password — no paste needed.
+                </div>
+              </div>
+              <button
+                onClick={handleCredentialLogin}
+                disabled={autoLoginBusy}
+                className="text-sm px-4 py-2 rounded-lg font-medium transition-opacity hover:opacity-90 disabled:opacity-50 whitespace-nowrap"
+                style={{ background: 'linear-gradient(135deg,#1c6d66,#0f3d39)', color: '#fff' }}
+              >
+                {autoLoginBusy ? 'Logging in…' : 'Auto-login & Run'}
+              </button>
+            </div>
+            {autoLoginError && (
+              <div className="text-xs mt-2" style={{ color: '#fca5a5' }}>{autoLoginError}</div>
+            )}
+            <div className="text-[11px] mt-2" style={{ color: '#64748b' }}>
+              Or refresh manually below (paste a cookie).
+            </div>
+          </div>
+        )}
 
         {/* Step 1 — open SUT login */}
         <div className="space-y-3 text-sm" style={{ color: '#cbd5e1' }}>

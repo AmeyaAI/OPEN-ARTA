@@ -49,7 +49,13 @@ export default function GenerateAllResultsModal({ open, onClose, job, onRetry, o
   }).length
   const coverageGapCount = job.results.filter(r => r.status !== 'skipped' && isGap(r)).length
   const failedCount = job.failed
-  const skippedCount = job.results.filter(r => r.status === 'skipped').length
+  // not_automatable is persisted as status:'skipped' + skip_reason:'not_automatable';
+  // surface it as its own bucket and DON'T double-count it under Skipped.
+  const notAutomatableCount = job.results.filter(r => r.skip_reason === 'not_automatable').length
+  const genFailedCount = job.results.filter(r => r.status === 'gen_failed' || r.gen_failed).length
+  const skippedCount = job.results.filter(
+    r => r.status === 'skipped' && r.skip_reason !== 'not_automatable'
+  ).length
 
   const rateLimitActive = job.rate_limit_reset && job.rate_limit_reset * 1000 > Date.now()
 
@@ -134,6 +140,18 @@ export default function GenerateAllResultsModal({ open, onClose, job, onRetry, o
               <span className="text-xs" style={{ color: '#64748b' }}>Failed</span>
             </div>
           )}
+          {genFailedCount > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-lg font-bold" style={{ color: '#fb7185' }}>{genFailedCount}</span>
+              <span className="text-xs" style={{ color: '#64748b' }}>Gen failed</span>
+            </div>
+          )}
+          {notAutomatableCount > 0 && (
+            <div className="flex items-center gap-1.5" title="Verified by inspection — CVE-triage / dependency bump / doc-spike; not test-automatable">
+              <span className="text-lg font-bold" style={{ color: '#64748b' }}>{notAutomatableCount}</span>
+              <span className="text-xs" style={{ color: '#64748b' }}>Not automatable</span>
+            </div>
+          )}
           {skippedCount > 0 && (
             <div className="flex items-center gap-1.5">
               <span className="text-lg font-bold" style={{ color: '#94a3b8' }}>{skippedCount}</span>
@@ -179,7 +197,22 @@ export default function GenerateAllResultsModal({ open, onClose, job, onRetry, o
                       </span>
                     )}
                   </div>
-                  {r.status === 'skipped' && <span className="text-[10px]" style={{ color: '#94a3b8' }}>up to date</span>}
+                  {r.skip_reason === 'not_automatable' && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded"
+                          title={r.not_automatable_detail || r.not_automatable_reason || ''}
+                          style={{ background: '#64748b18', color: '#94a3b8', border: '1px solid #64748b30' }}>
+                      not automatable{r.not_automatable_reason ? ` · ${r.not_automatable_reason}` : ''}
+                    </span>
+                  )}
+                  {(r.status === 'gen_failed' || r.gen_failed) && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded"
+                          title={r.coverage_gap_cause || ''}
+                          style={{ background: '#fb718515', color: '#fb7185', border: '1px solid #fb718530' }}>
+                      gen failed{r.coverage_gap_cause ? ` · ${r.coverage_gap_cause}` : ''}
+                    </span>
+                  )}
+                  {r.status === 'skipped' && r.skip_reason !== 'not_automatable' &&
+                    <span className="text-[10px]" style={{ color: '#94a3b8' }}>up to date</span>}
                   <span className="text-[10px]" style={{ color: '#94a3b8' }}>{isExpanded ? '▲' : '▼'}</span>
                 </button>
 

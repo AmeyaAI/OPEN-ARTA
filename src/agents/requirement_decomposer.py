@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import re
+import os
 from dataclasses import dataclass
 from typing import Any, Iterable
 
@@ -169,7 +170,17 @@ def should_decompose(
     if tool_name not in _R127_B_SUPPORTED_TOOLS:
         return False
     if not is_ollama_provider(provider_tag):
-        return False
+        # R127.B.CC — the claude_code CLI (`claude --print`) has NO max_tokens
+        # flag, so large PW specs truncate mid-emission (unbalanced braces →
+        # _dry_run_quarantine), exactly like small-Ollama. The Anthropic SDK
+        # honours max_tokens and doesn't need this. So give claude_code the same
+        # per-scenario decomposition. Opt-in env (default on); disable with
+        # ARTA_R127_B_CLAUDE_CODE_DECOMPOSE=0 to restore the batch/single path.
+        _is_cc = any(s in str(provider_tag or "").lower()
+                     for s in ("claude_code", "claude_cli", "claudecli"))
+        if not (_is_cc and os.environ.get(
+                "ARTA_R127_B_CLAUDE_CODE_DECOMPOSE", "1").lower() in ("1", "true")):
+            return False
     # R136.A — pick threshold defaults based on model tier when caller
     # didn't supply explicit overrides. Small-Ollama models get the
     # lower thresholds; other paths get the default R127.B values.
